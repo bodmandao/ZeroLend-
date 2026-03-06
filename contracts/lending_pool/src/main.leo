@@ -119,5 +119,58 @@ program lending_pool.aleo {
         return MAX_LOAN_TIER_1;
     }
 
+    // ----------------------------------------------------------------
+    // TRANSITIONS
+    // ----------------------------------------------------------------
 
+    /// Initialize the lending pool. Called once by deployer.
+    transition initialize(
+        usdc_initial_liquidity: u128,
+        usdc_token:             private_token.aleo/Token
+    ) -> (private_token.aleo/Token, LenderDeposit,Future) {
+        assert_eq(usdc_token.token_id, USDC_TOKEN_ID);
+        assert(usdc_token.amount >= usdc_initial_liquidity);
+
+        let change_amount: u128 = usdc_token.amount - usdc_initial_liquidity;
+
+        // Return change to deployer
+        let change: private_token.aleo/Token = private_token.aleo/Token {
+            owner:    usdc_token.owner,
+            token_id: USDC_TOKEN_ID,
+            amount:   change_amount,
+        };
+
+        // Deployer's deposit receipt
+        let deposit_nonce: field = BHP256::hash_to_field(self.caller);
+        let receipt: LenderDeposit = LenderDeposit {
+            owner:            usdc_token.owner,
+            pool_id:          POOL_ID,
+            token_id:         USDC_TOKEN_ID,
+            deposited_amount: usdc_initial_liquidity,
+            deposit_block:    0u32,
+            share_nonce:      deposit_nonce,
+        };
+
+        return (change, receipt, finalize_initialize(
+            self.caller,
+            usdc_initial_liquidity
+        ));
+    }
+
+     async function finalize_initialize(admin: address, initial_liquidity: u128) {
+        let existing: u128 = Mapping::get_or_use(pool_liquidity, USDC_TOKEN_ID, 0u128);
+        assert_eq(existing, 0u128); // ensure fresh pool
+        Mapping::set(pool_admin, 0u8, admin);
+        Mapping::set(pool_liquidity, USDC_TOKEN_ID, initial_liquidity);
+        Mapping::set(pool_borrowed, USDC_TOKEN_ID, 0u128);
+        Mapping::set(pool_interest_earned, USDC_TOKEN_ID, 0u128);
+        Mapping::set(active_loan_count, POOL_ID, 0u32);
+
+        // Set default loan terms per tier (in blocks)
+        Mapping::set(loan_term_blocks, 1u8, 17280u32);  // ~2 days
+        Mapping::set(loan_term_blocks, 2u8, 43200u32);  // ~5 days
+        Mapping::set(loan_term_blocks, 3u8, 86400u32);  // ~10 days
+        Mapping::set(loan_term_blocks, 4u8, 172800u32); // ~20 days
+        Mapping::set(loan_term_blocks, 5u8, 259200u32); // ~30 days
+    }
 }
