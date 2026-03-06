@@ -67,5 +67,25 @@ program private_token.aleo {
         Mapping::set(total_supply, token_id, s + amount);
     }
 
+    /// Private transfer — amounts hidden from public.
+    transition transfer_private(
+        sender_token: Token,
+        receiver:     address,
+        amount:       u128
+    ) -> (Token, Token) {
+        assert(sender_token.amount >= amount);
+        let change: Token = Token {
+            owner:    sender_token.owner,
+            token_id: sender_token.token_id,
+            amount:   sender_token.amount - amount,
+        };
+        let recv: Token = Token {
+            owner:    receiver,
+            token_id: sender_token.token_id,
+            amount:   amount,
+        };
+        return (change, recv);
+    }
+
    
 }
