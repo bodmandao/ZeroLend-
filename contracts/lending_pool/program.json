@@ -8,12 +8,14 @@
     {
       "name": "credit_score.aleo",
       "path": "../credit_score",
-      "network": "testnet"
+      "network": "testnet",
+       "location": "local" 
     },
     {
       "name": "private_token.aleo",
       "path": "../private_token",
-      "network": "testnet"
+      "network": "testnet",
+       "location": "local" 
     }
   ],
   "dev_dependencies": null
