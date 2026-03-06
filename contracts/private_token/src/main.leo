@@ -46,5 +46,26 @@ program private_token.aleo {
         Mapping::set(token_admin,  token_id, admin);
     }
 
+     /// Mint tokens — only callable by the token admin.
+    async transition mint(
+        token_id: field,
+        amount:   u128,
+        receiver: address
+    ) -> (  Token, Future) {
+        let t: Token = Token {
+            owner:    receiver,
+            token_id: token_id,
+            amount:   amount,
+        };
+        return (t, finalize_mint(token_id, amount, self.caller));
+    }
+
+    async function finalize_mint(token_id: field, amount: u128, caller: address) {
+        let admin: address = Mapping::get(token_admin, token_id);
+        assert_eq(admin, caller);
+        let s: u128 = Mapping::get_or_use(total_supply, token_id, 0u128);
+        Mapping::set(total_supply, token_id, s + amount);
+    }
+
    
 }
