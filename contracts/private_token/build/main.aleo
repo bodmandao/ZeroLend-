@@ -61,3 +61,37 @@ function transfer_private:
     cast r1 r0.token_id r2 into r6 as Token.record;
     output r5 as Token.record;
     output r6 as Token.record;
+
+function combine:
+    input r0 as Token.record;
+    input r1 as Token.record;
+    assert.eq r0.token_id r1.token_id;
+    assert.eq r0.owner r1.owner;
+    add r0.amount r1.amount into r2;
+    cast r0.owner r0.token_id r2 into r3 as Token.record;
+    output r3 as Token.record;
+
+function split:
+    input r0 as Token.record;
+    input r1 as u128.private;
+    gte r0.amount r1 into r2;
+    assert.eq r2 true;
+    cast r0.owner r0.token_id r1 into r3 as Token.record;
+    sub r0.amount r1 into r4;
+    cast r0.owner r0.token_id r4 into r5 as Token.record;
+    output r3 as Token.record;
+    output r5 as Token.record;
+
+function burn:
+    input r0 as Token.record;
+    async burn r0.token_id r0.amount into r1;
+    output r1 as private_token.aleo/burn.future;
+
+finalize burn:
+    input r0 as field.public;
+    input r1 as u128.public;
+    get total_supply[r0] into r2;
+    gte r2 r1 into r3;
+    assert.eq r3 true;
+    sub r2 r1 into r4;
+    set r4 into total_supply[r0];

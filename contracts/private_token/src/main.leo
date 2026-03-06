@@ -87,5 +87,31 @@ program private_token.aleo {
         return (change, recv);
     }
 
+    /// Combine two records into one (consolidation before deposit).
+    transition combine(a: Token, b: Token) -> Token {
+        assert_eq(a.token_id, b.token_id);
+        assert_eq(a.owner,    b.owner);
+        return Token { owner: a.owner, token_id: a.token_id, amount: a.amount + b.amount };
+    }
+
+    /// Split one record into two.
+    transition split(tok: Token, split_amount: u128) -> (Token, Token) {
+        assert(tok.amount >= split_amount);
+        let a: Token = Token { owner: tok.owner, token_id: tok.token_id, amount: split_amount };
+        let b: Token = Token { owner: tok.owner, token_id: tok.token_id, amount: tok.amount - split_amount };
+        return (a, b);
+    }
+
+    /// Burn tokens 
+    async transition burn(tok: Token) -> Future {
+        return (finalize_burn(tok.token_id, tok.amount));
+    }
+
+    async function finalize_burn(token_id: field, amount: u128) {
+        let s: u128 = Mapping::get(total_supply, token_id);
+        assert(s >= amount);
+        Mapping::set(total_supply, token_id, s - amount);
+    }
+
    
 }
