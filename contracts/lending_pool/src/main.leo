@@ -82,4 +82,42 @@ program lending_pool.aleo {
     /// Nullifier set — prevents loan_id reuse
     mapping loan_nullifiers: field => bool;
 
+     // ----------------------------------------------------------------
+    // HELPER FUNCTIONS
+    // ----------------------------------------------------------------
+
+    /// Compute interest accrued on a loan.
+    function compute_interest(
+        principal:     u128,
+        rate_bps:      u64,
+        blocks_held:   u32
+    ) -> u128 {
+        // interest = principal * rate_bps * blocks / (10000 * 1000)
+        // Using u128 to avoid overflow
+        let rate: u128 = rate_bps as u128;
+        let blocks: u128 = blocks_held as u128;
+        let numerator: u128 = principal * rate * blocks;
+        let denominator: u128 = 10_000_000u128; // 10000 bps * 1000 blocks
+        return numerator / denominator;
+    }
+
+    /// Get interest rate for a tier.
+    function get_rate_for_tier(tier: u8) -> u64 {
+        if tier == 5u8 { return RATE_TIER_5; }
+        if tier == 4u8 { return RATE_TIER_4; }
+        if tier == 3u8 { return RATE_TIER_3; }
+        if tier == 2u8 { return RATE_TIER_2; }
+        return RATE_TIER_1;
+    }
+
+    /// Get max loan for a tier.
+    function get_max_loan_for_tier(tier: u8) -> u128 {
+        if tier == 5u8 { return MAX_LOAN_TIER_5; }
+        if tier == 4u8 { return MAX_LOAN_TIER_4; }
+        if tier == 3u8 { return MAX_LOAN_TIER_3; }
+        if tier == 2u8 { return MAX_LOAN_TIER_2; }
+        return MAX_LOAN_TIER_1;
+    }
+
+
 }
