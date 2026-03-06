@@ -1,4 +1,6 @@
-// The 'lending_pool' program.
+import credit_score.aleo;
+import private_token.aleo;
+
 program lending_pool.aleo {
      // ----------------------------------------------------------------
     // CONSTANTS
