@@ -4,6 +4,17 @@
   "description": "",
   "license": "MIT",
   "leo": "3.4.0",
-  "dependencies": null,
+ "dependencies": [
+    {
+      "name": "credit_score.aleo",
+      "path": "../credit_score",
+      "network": "testnet"
+    },
+    {
+      "name": "private_token.aleo",
+      "path": "../private_token",
+      "network": "testnet"
+    }
+  ],
   "dev_dependencies": null
 }

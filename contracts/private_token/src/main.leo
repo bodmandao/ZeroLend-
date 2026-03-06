@@ -1,19 +1,50 @@
-// The 'private_token' program.
-program private_token.aleo {
-    // This is the constructor for the program.
-    // The constructor allows you to manage program upgrades.
-    // It is called when the program is deployed or upgraded.
-    // It is currently configured to **prevent** upgrades.
-    // Other configurations include:
-    //  - @admin(address="aleo1...")
-    //  - @checksum(mapping="credits.aleo/fixme", key="0field")
-    //  - @custom
-    // For more information, please refer to the documentation: `https://docs.leo-lang.org/guides/upgradability`
-    @noupgrade
-    async constructor() {}
+// ============================================================
+// Private fungible token foundation for the lending protocol
+// ============================================================
 
-    transition main(public a: u32, b: u32) -> u32 {
-        let c: u32 = a + b;
-        return c;
+program private_token.aleo {
+
+    // ----------------------------------------------------------------
+    // RECORDS
+    // ----------------------------------------------------------------
+
+    record Token {
+        owner:    address,
+        token_id: field,
+        amount:   u128,
     }
+
+    // ----------------------------------------------------------------
+    // MAPPINGS
+    // ----------------------------------------------------------------
+
+    mapping total_supply: field => u128;
+    mapping token_admin:  field => address;
+
+    // ----------------------------------------------------------------
+    // TRANSITIONS
+    // ----------------------------------------------------------------
+
+    /// Initialize a new token type. Called once by the deployer.
+    transition initialize(
+        token_id:       field,
+        initial_supply: u128,
+        receiver:       address
+    ) -> Token {
+        let t: Token = Token {
+            owner:    receiver,
+            token_id: token_id,
+            amount:   initial_supply,
+        };
+        return t then finalize(token_id, initial_supply, self.caller);
+    }
+
+    finalize initialize(token_id: field, supply: u128, admin: address) {
+        let existing: u128 = Mapping::get_or_use(total_supply, token_id, 0u128);
+        assert_eq(existing, 0u128); // prevent re-initialization
+        Mapping::set(total_supply, token_id, supply);
+        Mapping::set(token_admin,  token_id, admin);
+    }
+
+   
 }
