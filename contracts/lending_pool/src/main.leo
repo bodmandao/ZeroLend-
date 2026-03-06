@@ -57,4 +57,29 @@ program lending_pool.aleo {
         nonce:          field,
     }
 
+     // ----------------------------------------------------------------
+    // MAPPINGS 
+    // ----------------------------------------------------------------
+
+    /// Total liquidity in pool per token
+    mapping pool_liquidity: field => u128;  // token_id => amount
+
+    /// Total borrowed per token
+    mapping pool_borrowed: field => u128;
+
+    /// Total interest collected (for yield distribution)
+    mapping pool_interest_earned: field => u128;
+
+    /// Count of active loans (for solvency dashboard)
+    mapping active_loan_count: field => u32;
+
+    /// Protocol admin
+    mapping pool_admin: u8 => address;
+
+    /// Loan term in blocks per tier (how long borrowers have to repay)
+    mapping loan_term_blocks: u8 => u32;
+
+    /// Nullifier set — prevents loan_id reuse
+    mapping loan_nullifiers: field => bool;
+
 }
