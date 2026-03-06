@@ -26,20 +26,20 @@ program private_token.aleo {
     // ----------------------------------------------------------------
 
     /// Initialize a new token type. Called once by the deployer.
-    transition initialize(
+    async transition initialize(
         token_id:       field,
         initial_supply: u128,
         receiver:       address
-    ) -> Token {
+    ) -> (Token, Future) {
         let t: Token = Token {
             owner:    receiver,
             token_id: token_id,
             amount:   initial_supply,
         };
-        return t then finalize(token_id, initial_supply, self.caller);
+        return (t,finalize(token_id, initial_supply, self.caller));
     }
 
-    finalize initialize(token_id: field, supply: u128, admin: address) {
+    async function finalize(token_id: field, supply: u128, admin: address) {
         let existing: u128 = Mapping::get_or_use(total_supply, token_id, 0u128);
         assert_eq(existing, 0u128); // prevent re-initialization
         Mapping::set(total_supply, token_id, supply);
