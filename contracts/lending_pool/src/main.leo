@@ -453,10 +453,10 @@ program lending_pool.aleo {
             amount:   total_withdrawal,
         };
 
-        return payout then finalize(receipt.deposited_amount, yield_earned);
+        return (payout, finalize_withdraw(receipt.deposited_amount, yield_earned));
     }
 
-    async function finalizewithdraw(principal: u128, yield_paid: u128) {
+    async function finalize_withdraw(principal: u128, yield_paid: u128) {
         let liquidity: u128 = Mapping::get(pool_liquidity, USDC_TOKEN_ID);
         assert(liquidity >= principal + yield_paid);
         Mapping::set(pool_liquidity, USDC_TOKEN_ID, liquidity - principal - yield_paid);
@@ -468,18 +468,13 @@ program lending_pool.aleo {
         }
     }
 
-    /// Public view: get pool utilization rate (0–10000 bps)
-    /// = borrowed / liquidity * 10000
-    /// This is public — solvency is always provable.
-    transition get_utilization() -> () {
-        return () then finalize();
+    async transition get_utilization() -> (Future) {
+        return (finalize_get_utilization());
     }
 
-    finalize get_utilization() {
+    async function finalize_get_utilization() {
         let liquidity: u128 = Mapping::get_or_use(pool_liquidity, USDC_TOKEN_ID, 1u128);
         let borrowed:  u128 = Mapping::get_or_use(pool_borrowed,  USDC_TOKEN_ID, 0u128);
-        // Utilization is readable from the mapping directly
-        // Finalize just asserts solvency: borrowed <= liquidity
         assert(borrowed <= liquidity);
     }
 }
