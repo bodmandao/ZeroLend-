@@ -4,8 +4,8 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Menu, X, Zap, ChevronDown, ExternalLink } from 'lucide-react';
-import { useStore } from '@/lib/store';
-import { connectWallet, formatAddress } from '@/lib/aleo';
+import { useStore } from '../../lib/store';
+import { connectWallet, formatAddress } from '../../lib/aleo';
 import toast from 'react-hot-toast';
 
 export default function Navbar() {
