@@ -4,6 +4,13 @@
   "description": "",
   "license": "MIT",
   "leo": "3.4.0",
- "dependencies": null,
+  "dependencies": [
+    {
+      "name": "credits.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    }
+  ],
   "dev_dependencies": null
 }
