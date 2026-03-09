@@ -25,7 +25,6 @@ export default function Navbar() {
   return (
     <>
     
-
       <nav className="sticky top-0 z-40 glass border-b border-zero-border/50">
         <div className="flex items-center justify-between h-16 px-6">
 
