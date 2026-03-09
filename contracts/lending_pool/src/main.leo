@@ -1,4 +1,4 @@
-program lending_pool.aleo {
+program zerolend_lending_pool.aleo {
 
     /// Private fungible token (USDC or any asset)
     record Token {
@@ -111,6 +111,11 @@ program lending_pool.aleo {
     // Public aggregate credit stats (no individual data exposed)
     mapping aggregate_tier_count:  u8    => u32;
 
+    // constructor
+        @noupgrade
+    async constructor(
+    ) {}
+
     // ================================================================
     // HELPER FUNCTIONS 
     // ================================================================
@@ -160,7 +165,7 @@ program lending_pool.aleo {
         blocks_held: u32
     ) -> u128 {
         let rate:   u128 = rate_bps as u128;
-        let blocks: u128 = blocks_held as u32 as u128;
+        let blocks: u128 = blocks_held as u128;
         return (principal * rate * blocks) / 10_000_000u128;
     }
 
