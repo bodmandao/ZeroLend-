@@ -6,13 +6,13 @@ import {
   TrendingUp, Shield, AlertTriangle, CheckCircle,
   ChevronRight, Zap, Clock, DollarSign, Lock
 } from 'lucide-react';
-import { useStore } from '@/lib/store';
+import { useStore } from '../../lib/store';
 import {
   getTierInfo, randomField, formatUsdc, usdcToMicro,
   microToUsdc, computeInterest, executeTransaction,
   PROGRAM_ID, buildTierProof, buildLoanRecord, TIERS
-} from '@/lib/aleo';
-import { insertLoan } from '@/lib/supabase';
+} from '../../lib/aleo';
+import { insertLoan } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 export default function BorrowPage() {
