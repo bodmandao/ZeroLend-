@@ -6,7 +6,7 @@ import {
   LayoutDashboard, TrendingUp, Wallet, ShieldCheck,
   Settings, BookOpen, Zap, ChevronRight
 } from 'lucide-react';
-import { useStore } from '@/lib/store';
+import { useStore } from '../../lib/store';
 import clsx from 'clsx';
 
 const NAV = [
