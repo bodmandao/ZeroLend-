@@ -1,32 +1,27 @@
-// ── ZeroLend Aleo Contract Helpers ───────────────────────────
-// Wraps @provablehq/sdk calls for the lending_pool.aleo program
+export const PROGRAM_ID   = 'lending_pool.aleo';
+export const NETWORK      = 'testnet';
+export const API_URL      = 'https://api.explorer.provable.com/v1';
+export const ORG_ID       = '1field';
 
-export const PROGRAM_ID = 'lending_pool.aleo';
-export const NETWORK    = 'testnet';
-export const API_URL    = 'https://api.explorer.provable.com/v1';
-
-export const TOKEN_ID   = '1field';
-export const ORG_ID     = '1field';
-
-// ── Tier definitions ──────────────────────────────────────────
+// ── Tier definitions  ──────────────
 export const TIERS = {
-  1: { label: 'Poor',      color: '#ef4444', maxLoan: 100,    rate: 20, minScore: 0   },
-  2: { label: 'Fair',      color: '#f59e0b', maxLoan: 500,    rate: 15, minScore: 300 },
-  3: { label: 'Good',      color: '#3b82f6', maxLoan: 2000,   rate: 10, minScore: 500 },
-  4: { label: 'Great',     color: '#10b981', maxLoan: 10000,  rate: 7,  minScore: 700 },
-  5: { label: 'Excellent', color: '#00d4ff', maxLoan: 50000,  rate: 4,  minScore: 850 },
+  1: { label: 'Poor',      color: '#ef4444', maxLoan: 10,    rate: 20, minScore: 0   },
+  2: { label: 'Fair',      color: '#f59e0b', maxLoan: 50,    rate: 15, minScore: 300 },
+  3: { label: 'Good',      color: '#3b82f6', maxLoan: 200,   rate: 10, minScore: 500 },
+  4: { label: 'Great',     color: '#10b981', maxLoan: 1000,  rate: 7,  minScore: 700 },
+  5: { label: 'Excellent', color: '#00d4ff', maxLoan: 5000,  rate: 4,  minScore: 850 },
 };
 
-// ── Score calculation (mirrors Leo logic) ─────────────────────
+// ── Score calculation (mirrors Leo logic exactly) ─────────────
 export function computeCreditScore(
-  walletAgeDays: number,
+  walletAgeDays:  number,
   repaymentsMade: number,
-  defaults: number,
-  totalVolume: number
+  defaults:       number,
+  totalVolume:    number  // microcredits
 ): number {
   const agePts  = Math.min(walletAgeDays * 2, 200);
   const repPts  = Math.min(repaymentsMade * 10, 400);
-  const volPts  = Math.min(Math.floor(totalVolume / 1_000_000), 200);
+  const volPts  = Math.min(Math.floor(totalVolume / 1_000_000), 200); // 1pt per ALEO
   const penalty = defaults * 100;
   const raw     = 200 + agePts + repPts + volPts;
   return Math.min(Math.max(raw - penalty, 0), 1000);
@@ -41,36 +36,27 @@ export function scoreToTier(score: number): 1 | 2 | 3 | 4 | 5 {
 }
 
 export function computeInterest(
-  principal: number,
-  rateBps: number,
+  principal:  number,  // microcredits
+  rateBps:    number,
   blocksHeld: number
 ): number {
   return Math.floor((principal * rateBps * blocksHeld) / 10_000_000);
 }
 
-// ── Field/nonce generators ────────────────────────────────────
-export function randomField(): string {
-  const n = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
-  return `${n}field`;
-}
-
-export function randomU32(): number {
-  return Math.floor(Math.random() * 2_000_000);
-}
-
-export function microToUsdc(micro: number): number {
+// ── Unit helpers (microcredits ↔ ALEO) ────────────────────────
+export function microToAleo(micro: number): number {
   return micro / 1_000_000;
 }
 
-export function usdcToMicro(usdc: number): number {
-  return Math.floor(usdc * 1_000_000);
+export function aleoToMicro(aleo: number): number {
+  return Math.floor(aleo * 1_000_000);
 }
 
-export function formatUsdc(micro: number): string {
-  return `$${(micro / 1_000_000).toLocaleString('en-US', {
+export function formatAleo(micro: number): string {
+  return `${(micro / 1_000_000).toLocaleString('en-US', {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  })}`;
+    maximumFractionDigits: 4,
+  })} ALEO`;
 }
 
 export function formatAddress(addr: string): string {
@@ -82,32 +68,17 @@ export function getTierInfo(tier: number) {
   return TIERS[tier as keyof typeof TIERS] ?? TIERS[1];
 }
 
-// ── Aleo wallet interaction ───────────────────────────────────
-// Uses window.leoWallet (Leo Wallet browser extension)
-// or window.puzzle (Puzzle Wallet)
-
-export async function getAleoWallet() {
-  if (typeof window === 'undefined') return null;
-  // Try Leo Wallet first
-  if ((window as any).leoWallet) return (window as any).leoWallet;
-  // Try Puzzle Wallet
-  if ((window as any).puzzle) return (window as any).puzzle;
-  return null;
+// ── Field / nonce generators ──────────────────────────────────
+export function randomField(): string {
+  const n = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+  return `${n}field`;
 }
 
-export async function connectWallet(): Promise<string | null> {
-  const wallet = await getAleoWallet();
-  if (!wallet) {
-    throw new Error('No Aleo wallet found. Install Leo Wallet or Puzzle Wallet.');
-  }
-  try {
-    const [account] = await wallet.requestAccounts();
-    return account;
-  } catch {
-    throw new Error('User rejected wallet connection.');
-  }
+export function randomU32(): number {
+  return Math.floor(Math.random() * 2_000_000);
 }
 
+// ── Wallet balance (from credits.aleo native mapping) ─────────
 export async function getWalletBalance(address: string): Promise<number> {
   try {
     const res = await fetch(
@@ -120,7 +91,7 @@ export async function getWalletBalance(address: string): Promise<number> {
   }
 }
 
-// ── Transaction execution ─────────────────────────────────────
+// ── Transaction execution (via wallet adapter) ────────────────
 export interface ExecuteParams {
   programId:    string;
   functionName: string;
@@ -128,15 +99,17 @@ export interface ExecuteParams {
   fee?:         number;
 }
 
-export async function executeTransaction(params: ExecuteParams): Promise<string> {
-  const wallet = await getAleoWallet();
+export async function executeTransaction(
+  params: ExecuteParams,
+  wallet: any  // injected from useWallet() hook
+): Promise<string> {
   if (!wallet) throw new Error('Wallet not connected');
 
   const { programId, functionName, inputs, fee = 1_000_000 } = params;
 
   const txId = await wallet.requestTransaction({
-    address:      await wallet.getAddress(),
-    chainId:      'aleo:1',
+    address:     wallet.publicKey,
+    chainId:     'aleo:1',
     transitions: [{
       program:  programId,
       function: functionName,
@@ -149,11 +122,11 @@ export async function executeTransaction(params: ExecuteParams): Promise<string>
   return txId;
 }
 
-// ── Record fetching ───────────────────────────────────────────
+// ── Mapping fetcher ───────────────────────────────────────────
 export async function fetchMappingValue(
   program: string,
   mapping: string,
-  key: string
+  key:     string
 ): Promise<string | null> {
   try {
     const res = await fetch(
@@ -166,17 +139,18 @@ export async function fetchMappingValue(
   }
 }
 
+// ── Pool stats (keys are now 0u8, not TOKEN_ID field) ─────────
 export async function fetchPoolStats() {
   try {
     const [liquidity, borrowed, interestEarned, loanCount] = await Promise.all([
-      fetchMappingValue(PROGRAM_ID, 'pool_liquidity', TOKEN_ID),
-      fetchMappingValue(PROGRAM_ID, 'pool_borrowed',  TOKEN_ID),
-      fetchMappingValue(PROGRAM_ID, 'pool_interest_earned', TOKEN_ID),
-      fetchMappingValue(PROGRAM_ID, 'active_loan_count', '0u8'),
+      fetchMappingValue(PROGRAM_ID, 'pool_liquidity',       '0u8'),
+      fetchMappingValue(PROGRAM_ID, 'pool_borrowed',        '0u8'),
+      fetchMappingValue(PROGRAM_ID, 'pool_interest_earned', '0u8'),
+      fetchMappingValue(PROGRAM_ID, 'active_loan_count',    '0u8'),
     ]);
 
     const tierCounts = await Promise.all(
-      [1,2,3,4,5].map(t =>
+      [1, 2, 3, 4, 5].map(t =>
         fetchMappingValue(PROGRAM_ID, 'aggregate_tier_count', `${t}u8`)
       )
     );
@@ -185,11 +159,11 @@ export async function fetchPoolStats() {
     const bor = parseInt(borrowed  ?? '0');
 
     return {
-      totalLiquidity:     liq,
-      totalBorrowed:      bor,
+      totalLiquidity:      liq,
+      totalBorrowed:       bor,
       totalInterestEarned: parseInt(interestEarned ?? '0'),
-      activeLoanCount:    parseInt(loanCount ?? '0'),
-      utilizationRate:    liq > 0 ? Math.round((bor / liq) * 100) : 0,
+      activeLoanCount:     parseInt(loanCount ?? '0'),
+      utilizationRate:     liq > 0 ? Math.round((bor / liq) * 100) : 0,
       tier1Count: parseInt(tierCounts[0] ?? '0'),
       tier2Count: parseInt(tierCounts[1] ?? '0'),
       tier3Count: parseInt(tierCounts[2] ?? '0'),
@@ -201,54 +175,124 @@ export async function fetchPoolStats() {
   }
 }
 
-// ── Build Leo record strings ──────────────────────────────────
-export function buildTokenRecord(
-  owner: string, amount: number
+// ── Leo record string builders ────────────────────────────────
+
+/**
+ * credits.aleo native credits record.
+ * Used as input to deposit / request_loan / repay_loan / withdraw.
+ */
+export function buildCreditsRecord(
+  owner:         string,
+  microcredits:  number
 ): string {
-  return `{owner: ${owner}, token_id: ${TOKEN_ID}, amount: ${amount}u128}`;
+  return `{owner: ${owner}, microcredits: ${microcredits}u64}`;
 }
 
+/**
+ * CreditRecord — private, owner-only visible.
+ * total_volume is u64 (microcredits) now.
+ */
 export function buildCreditRecord(
-  owner: string,
-  walletAgeDays: number,
+  owner:          string,
+  walletAgeDays:  number,
   repaymentsMade: number,
-  defaults: number,
-  totalVolume: number,
-  currentScore: number,
-  lastUpdated: number,
-  nonce: string
+  defaults:       number,
+  totalVolume:    number,  // microcredits u64
+  currentScore:   number,
+  lastUpdated:    number,
+  nonce:          string
 ): string {
-  return `{owner: ${owner}, wallet_age_days: ${walletAgeDays}u32, repayments_made: ${repaymentsMade}u32, defaults: ${defaults}u32, total_volume: ${totalVolume}u128, current_score: ${currentScore}u32, last_updated: ${lastUpdated}u32, nonce: ${nonce}}`;
+  return [
+    `{owner: ${owner}`,
+    `wallet_age_days: ${walletAgeDays}u32`,
+    `repayments_made: ${repaymentsMade}u32`,
+    `defaults: ${defaults}u32`,
+    `total_volume: ${totalVolume}u64`,   // u64 — matches credits.aleo
+    `current_score: ${currentScore}u32`,
+    `last_updated: ${lastUpdated}u32`,
+    `nonce: ${nonce}}`,
+  ].join(', ');
 }
 
+/**
+ * CreditTierProof — reveals only tier, not raw data.
+ */
 export function buildTierProof(
-  owner: string,
-  tier: number,
-  orgId: string,
+  owner:     string,
+  tier:      number,
+  orgId:     string,
   expiresAt: number,
-  nonce: string
+  nonce:     string
 ): string {
   return `{owner: ${owner}, tier: ${tier}u8, org_id: ${orgId}, expires_at: ${expiresAt}u32, nonce: ${nonce}}`;
 }
 
+/**
+ * LoanRecord — private, held by borrower.
+ * No token_id field. principal / interest_rate are u64.
+ */
 export function buildLoanRecord(
-  owner: string,
-  loanId: string,
-  principal: number,
-  interestRate: number,
+  owner:         string,
+  loanId:        string,
+  principal:     number,   // microcredits u64
+  interestRate:  number,   // bps u64
   borrowedBlock: number,
-  dueBlock: number,
-  tier: number,
-  nonce: string
+  dueBlock:      number,
+  tier:          number,
+  nonce:         string
 ): string {
-  return `{owner: ${owner}, loan_id: ${loanId}, token_id: ${TOKEN_ID}, principal: ${principal}u128, interest_rate: ${interestRate}u64, borrowed_block: ${borrowedBlock}u32, due_block: ${dueBlock}u32, tier_at_borrow: ${tier}u8, nonce: ${nonce}}`;
+  return [
+    `{owner: ${owner}`,
+    `loan_id: ${loanId}`,
+    `principal: ${principal}u64`,        // u64, no token_id
+    `interest_rate: ${interestRate}u64`,
+    `borrowed_block: ${borrowedBlock}u32`,
+    `due_block: ${dueBlock}u32`,
+    `tier_at_borrow: ${tier}u8`,
+    `nonce: ${nonce}}`,
+  ].join(', ');
 }
 
+/**
+ * LenderDeposit receipt — private, held by lender.
+ * No token_id field. deposited_amount is u64.
+ */
 export function buildLenderDeposit(
-  owner: string,
-  amount: number,
+  owner:        string,
+  amount:       number,   // microcredits u64
   depositBlock: number,
-  nonce: string
+  nonce:        string
 ): string {
-  return `{owner: ${owner}, token_id: ${TOKEN_ID}, deposited_amount: ${amount}u128, deposit_block: ${depositBlock}u32, nonce: ${nonce}}`;
+  return [
+    `{owner: ${owner}`,
+    `deposited_amount: ${amount}u64`,    // u64, no token_id
+    `deposit_block: ${depositBlock}u32`,
+    `nonce: ${nonce}}`,
+  ].join(', ');
+}
+
+/**
+ * OracleAttestation — private, sent to user by oracle.
+ * total_volume is u64 (microcredits).
+ */
+export function buildOracleAttestation(
+  owner:          string,
+  attester:       string,
+  walletAgeDays:  number,
+  repaymentsMade: number,
+  defaults:       number,
+  totalVolume:    number,  // microcredits u64
+  validUntil:     number,
+  attestationId:  string
+): string {
+  return [
+    `{owner: ${owner}`,
+    `attester: ${attester}`,
+    `wallet_age_days: ${walletAgeDays}u32`,
+    `repayments_made: ${repaymentsMade}u32`,
+    `defaults: ${defaults}u32`,
+    `total_volume: ${totalVolume}u64`,   // u64
+    `valid_until: ${validUntil}u32`,
+    `attestation_id: ${attestationId}}`,
+  ].join(', ');
 }

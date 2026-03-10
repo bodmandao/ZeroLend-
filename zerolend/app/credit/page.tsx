@@ -5,15 +5,15 @@ import {
   ShieldCheck, Shield, RefreshCw, Zap,
   ChevronRight, Eye, EyeOff, CheckCircle, Clock
 } from 'lucide-react';
-import { useStore } from '@/lib/store';
+import { useStore } from '../../lib/store';
 import {
   computeCreditScore, scoreToTier, getTierInfo,
   randomField, executeTransaction, PROGRAM_ID
-} from '@/lib/aleo';
+} from '../../lib/aleo';
 import {
   insertAttestation, getPendingAttestation,
   markAttestationRedeemed
-} from '@/lib/supabase';
+} from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 const TIER_LABELS = ['—', 'Poor', 'Fair', 'Good', 'Great', 'Excellent'];

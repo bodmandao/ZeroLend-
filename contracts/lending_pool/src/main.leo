@@ -1,6 +1,6 @@
 import credits.aleo;
 
-program zerolend_lending_pool.aleo {
+program zerolend_lending_pool_v1.aleo {
 
     // ================================================================
     // RECORDS
@@ -103,8 +103,13 @@ program zerolend_lending_pool.aleo {
     // Public aggregate credit stats 
     mapping aggregate_tier_count: u8      => u32;
 
+   
+    @noupgrade
+    async constructor(
+    ) {}
+
     // ================================================================
-    // HELPER FUNCTIONS (pure)
+    // HELPER FUNCTIONS
     // ================================================================
 
     /// Compute credit score 0-1000 from raw inputs
@@ -308,7 +313,7 @@ program zerolend_lending_pool.aleo {
     ) -> (CreditRecord, CreditTierProof) {
         let tier: u8 = score_to_tier(rec.current_score);
 
-        // Re-issue record back to owner (Leo records are consumed on use)
+        // Re-issue record back to owner
         let returned_rec: CreditRecord = CreditRecord {
             owner:           rec.owner,
             wallet_age_days: rec.wallet_age_days,

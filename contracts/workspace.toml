@@ -1,7 +1,0 @@
-[workspace]
-members = [
-  "private_token",
-  "credit_score",
-  "lending_pool",
-  "oracle_bridge",
-]

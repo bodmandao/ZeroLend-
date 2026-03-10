@@ -133,22 +133,6 @@ export default function BorrowPage() {
     }
   }
 
-  // Not connected
-  if (!wallet.connected) {
-    return (
-      <div className="p-6 max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[60vh] text-center">
-        <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
-          style={{ background: 'rgba(0,212,255,0.1)', border: '1px solid rgba(0,212,255,0.2)' }}>
-          <Lock size={28} className="text-zero-cyan" />
-        </div>
-        <h2 className="text-2xl font-bold text-zero-text mb-2" style={{ fontFamily: "'Syne', sans-serif" }}>
-          Connect Your Wallet
-        </h2>
-        <p className="text-zero-text-dim mb-6">Connect your Aleo wallet to borrow against your credit score.</p>
-      </div>
-    );
-  }
-
   // No credit score
   if (!creditScore || !creditTier) {
     return (
