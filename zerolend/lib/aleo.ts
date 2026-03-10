@@ -12,7 +12,7 @@ export const TIERS = {
   5: { label: 'Excellent', color: '#00d4ff', maxLoan: 5000,  rate: 4,  minScore: 850 },
 };
 
-// ── Score calculation (mirrors Leo logic exactly) ─────────────
+// ── Score calculation  ─────────────
 export function computeCreditScore(
   walletAgeDays:  number,
   repaymentsMade: number,
@@ -91,7 +91,7 @@ export async function getWalletBalance(address: string): Promise<number> {
   }
 }
 
-// ── Transaction execution (via wallet adapter) ────────────────
+// ── Transaction execution ────────────────
 export interface ExecuteParams {
   programId:    string;
   functionName: string;

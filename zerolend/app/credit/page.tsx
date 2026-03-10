@@ -1,57 +1,139 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
-  ShieldCheck, Shield, RefreshCw, Zap,
-  ChevronRight, Eye, EyeOff, CheckCircle, Clock
+  ShieldCheck, Shield, Zap,
+  Eye, EyeOff, CheckCircle, Loader2, Info
 } from 'lucide-react';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { useStore } from '../../lib/store';
 import {
   computeCreditScore, scoreToTier, getTierInfo,
-  randomField, executeTransaction, PROGRAM_ID
+  randomField, executeTransaction, PROGRAM_ID,
+  buildOracleAttestation, aleoToMicro, microToAleo,
+  getWalletBalance, API_URL
 } from '../../lib/aleo';
 import {
-  insertAttestation, getPendingAttestation,
-  markAttestationRedeemed
+  insertAttestation, markAttestationRedeemed,
+  getUserLoanHistory
 } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
-const TIER_LABELS = ['—', 'Poor', 'Fair', 'Good', 'Great', 'Excellent'];
-const TIER_DESC = [
-  '',
-  'Max $100 · 20% APR · 2-day term',
-  'Max $500 · 15% APR · 5-day term',
-  'Max $2,000 · 10% APR · 10-day term',
-  'Max $10,000 · 7% APR · 20-day term',
-  'Max $50,000 · 4% APR · 30-day term',
-];
+
+// ── Wallet age helper ─────────────────────────────────────────
+// Fetches the earliest transaction for a wallet from the Aleo explorer
+// and returns age in days. Falls back to 0 if not found.
+async function fetchWalletAgeDays(address: string): Promise<number> {
+  try {
+    const res = await fetch(
+      `${API_URL}/testnet/address/${address}/transitions?page=0&limit=1&order=asc`
+    );
+    if (!res.ok) return 0;
+    const data = await res.json();
+    const transitions = data?.transitions ?? data?.result ?? data;
+    if (!Array.isArray(transitions) || transitions.length === 0) return 0;
+
+    const earliest = transitions[0];
+    // block_height → estimate timestamp (testnet ~10s/block, genesis ~Jan 2024)
+    const genesisTs  = 1704067200000; // Jan 1 2024 UTC (approx testnet genesis)
+    const blockTime  = 10_000;        // 10s per block in ms
+    const blockHeight: number = earliest.block_height ?? earliest.height ?? 0;
+    const estimatedTs = genesisTs + blockHeight * blockTime;
+    const ageMs = Date.now() - estimatedTs;
+    return Math.max(0, Math.floor(ageMs / (1000 * 60 * 60 * 24)));
+  } catch {
+    return 0;
+  }
+}
 
 export default function CreditPage() {
-  const { wallet, creditScore, creditTier, creditRecord, setCreditRecord, setTierProof } = useStore();
+  const { wallet: walletAdapter,connected,address } = useWallet();
+  const {
+    wallet, creditScore, creditTier, creditRecord,
+    setCreditRecord, setTierProof
+  } = useStore();
 
-  // Oracle form state
   const [form, setForm] = useState({
-    walletAgeDays: '',
+    walletAgeDays:  '',
     repaymentsMade: '',
-    defaults: '',
-    totalVolume: '',
+    defaults:       '',
+    totalVolume:    '',  // whole ALEO units — converted to microcredits on submit
   });
-  const [step, setStep] = useState<'idle' | 'attesting' | 'redeeming' | 'proving' | 'done'>('idle');
+
+  const [prefilling, setPrefilling]       = useState(false);
+  const [prefillDone, setPrefillDone]     = useState(false);
+  const [prefillSource, setPrefillSource] = useState<Record<string, 'chain' | 'supabase' | 'new'>>({});
+
+  const [step, setStep]               = useState<'idle' | 'attesting' | 'redeeming' | 'proving' | 'done'>('idle');
   const [showRawData, setShowRawData] = useState(false);
   const [attestation, setAttestation] = useState<any>(null);
   const [proofExpiry, setProofExpiry] = useState('200');
 
-  const score = form.walletAgeDays
+  // ── Auto-prefill when wallet connects ────────────────────────
+  useEffect(() => {
+    if (!connected || prefillDone) return;
+    prefillForm(address);
+  }, [connected, address]);
+
+  async function prefillForm(address: string) {
+    setPrefilling(true);
+    console.log('check1')
+    try {
+    console.log('check2')
+
+      // 1. Wallet age — from Aleo chain explorer
+      const ageDays = await fetchWalletAgeDays(address);
+
+      // 2. Loan history — from Supabase (ZeroLend's own records)
+      const history = await getUserLoanHistory(address);
+      //  history shape: { repaidCount, liquidatedCount, totalRepaidVolumeMicro }
+
+      const sources: Record<string, 'chain' | 'supabase' | 'new'> = {
+        walletAgeDays:  ageDays > 0         ? 'chain'    : 'new',
+        repaymentsMade: history.repaidCount > 0     ? 'supabase' : 'new',
+        defaults:       history.liquidatedCount > 0  ? 'supabase' : 'new',
+        totalVolume:    history.totalRepaidVolumeMicro > 0 ? 'supabase' : 'new',
+      };
+
+      setForm({
+        walletAgeDays:  String(ageDays),
+        repaymentsMade: String(history.repaidCount),
+        defaults:       String(history.liquidatedCount),
+        totalVolume:    String(microToAleo(history.totalRepaidVolumeMicro)),
+      });
+
+      setPrefillSource(sources);
+      setPrefillDone(true);
+
+      const isNew = history.repaidCount === 0 && ageDays === 0;
+      if (isNew) {
+        toast('New wallet detected — starting with a clean slate.', { icon: '👋' });
+      } else {
+        toast.success('Credit history loaded from chain + ZeroLend records.');
+      }
+    } catch (e) {
+      // Silently fall back to empty form — don't block the user
+      setForm({ walletAgeDays: '0', repaymentsMade: '0', defaults: '0', totalVolume: '0' });
+      setPrefillDone(true);
+    } finally {
+      setPrefilling(false);
+    }
+  }
+
+  // ── Live score preview ────────────────────────────────────────
+  const volMicro    = aleoToMicro(parseFloat(form.totalVolume) || 0);
+  const score       = form.walletAgeDays !== ''
     ? computeCreditScore(
-        parseInt(form.walletAgeDays)   || 0,
+        parseInt(form.walletAgeDays)  || 0,
         parseInt(form.repaymentsMade) || 0,
-        parseInt(form.defaults)        || 0,
-        parseInt(form.totalVolume)     || 0
+        parseInt(form.defaults)       || 0,
+        volMicro
       )
     : null;
-
   const previewTier = score !== null ? scoreToTier(score) : null;
+  const tierInfo    = creditTier ? getTierInfo(creditTier) : null;
 
+  // ── Step 1: Oracle Attestation ────────────────────────────────
   async function handleAttest() {
     if (!wallet.connected || !wallet.address) {
       toast.error('Connect your wallet first');
@@ -61,14 +143,14 @@ export default function CreditPage() {
     try {
       const attId      = randomField();
       const currentBlk = 100;
-      const age        = parseInt(form.walletAgeDays)   || 0;
+      const age        = parseInt(form.walletAgeDays)  || 0;
       const reps       = parseInt(form.repaymentsMade) || 0;
-      const defs       = parseInt(form.defaults)        || 0;
-      const vol        = parseInt(form.totalVolume)     || 0;
-      const computedScore = computeCreditScore(age, reps, defs, vol);
-      const tier           = scoreToTier(computedScore);
+      const defs       = parseInt(form.defaults)       || 0;
+      const vol        = aleoToMicro(parseFloat(form.totalVolume) || 0);
 
-      // Store in Supabase
+      const computedScore = computeCreditScore(age, reps, defs, vol);
+      const tier          = scoreToTier(computedScore);
+
       await insertAttestation({
         user_address:    wallet.address,
         attestation_id:  attId,
@@ -80,8 +162,7 @@ export default function CreditPage() {
         tier,
       });
 
-      // Execute on-chain (admin/oracle calls this)
-      const txId = await executeTransaction({
+      await executeTransaction({
         programId:    PROGRAM_ID,
         functionName: 'attest_credit',
         inputs: [
@@ -89,14 +170,14 @@ export default function CreditPage() {
           `${age}u32`,
           `${reps}u32`,
           `${defs}u32`,
-          `${vol}u128`,
+          `${vol}u64`,
           '500u32',
           `${currentBlk}u32`,
           attId,
         ],
-      });
+      }, walletAdapter);
 
-      setAttestation({ attId, age, reps, defs, vol, tier, computedScore, txId });
+      setAttestation({ attId, age, reps, defs, vol, tier, computedScore });
       toast.success('Credit data attested on-chain!');
       setStep('redeeming');
     } catch (e: any) {
@@ -105,20 +186,26 @@ export default function CreditPage() {
     }
   }
 
+  // ── Step 2: Redeem Attestation → CreditRecord ─────────────────
   async function handleRedeem() {
     if (!attestation) return;
     setStep('redeeming');
     try {
       const nonce = randomField();
-      const att = attestation;
+      const att   = attestation;
 
-      const attRecord = `{owner: ${wallet.address}, attester: ${wallet.address}, wallet_age_days: ${att.age}u32, repayments_made: ${att.reps}u32, defaults: ${att.defs}u32, total_volume: ${att.vol}u128, valid_until: 600u32, attestation_id: ${att.attId}}`;
+      const attRecord = buildOracleAttestation(
+        wallet.address!,
+        wallet.address!,
+        att.age, att.reps, att.defs, att.vol,
+        600, att.attId
+      );
 
       await executeTransaction({
         programId:    PROGRAM_ID,
         functionName: 'redeem_attestation',
         inputs: [attRecord, '100u32', nonce],
-      });
+      }, walletAdapter);
 
       await markAttestationRedeemed(att.attId);
 
@@ -127,7 +214,7 @@ export default function CreditPage() {
         wallet_age_days: `${att.age}u32`,
         repayments_made: `${att.reps}u32`,
         defaults:        `${att.defs}u32`,
-        total_volume:    `${att.vol}u128`,
+        total_volume:    `${att.vol}u64`,
         current_score:   `${att.computedScore}u32`,
         last_updated:    '100u32',
         nonce,
@@ -142,19 +229,20 @@ export default function CreditPage() {
     }
   }
 
+  // ── Step 3: Prove Tier ────────────────────────────────────────
   async function handleProveTier() {
     if (!creditRecord || !wallet.address) return;
     setStep('proving');
     try {
       const pNonce = randomField();
       const expiry = parseInt(proofExpiry) || 200;
-      const rec = `{owner: ${creditRecord.owner}, wallet_age_days: ${creditRecord.wallet_age_days}, repayments_made: ${creditRecord.repayments_made}, defaults: ${creditRecord.defaults}, total_volume: ${creditRecord.total_volume}, current_score: ${creditRecord.current_score}, last_updated: ${creditRecord.last_updated}, nonce: ${creditRecord.nonce}}`;
+      const rec    = `{owner: ${creditRecord.owner}, wallet_age_days: ${creditRecord.wallet_age_days}, repayments_made: ${creditRecord.repayments_made}, defaults: ${creditRecord.defaults}, total_volume: ${creditRecord.total_volume}, current_score: ${creditRecord.current_score}, last_updated: ${creditRecord.last_updated}, nonce: ${creditRecord.nonce}}`;
 
       await executeTransaction({
         programId:    PROGRAM_ID,
         functionName: 'prove_tier',
-        inputs: [rec, pNonce, `${expiry}u32`, '100u32', '1field'],
-      });
+        inputs:       [rec, pNonce, `${expiry}u32`, '100u32', '1field'],
+      }, walletAdapter);
 
       const proofStr = `{owner: ${wallet.address}, tier: ${creditTier}u8, org_id: 1field, expires_at: ${100 + expiry}u32, nonce: ${pNonce}}`;
       setTierProof(proofStr);
@@ -166,17 +254,29 @@ export default function CreditPage() {
     }
   }
 
-  const tierInfo = creditTier ? getTierInfo(creditTier) : null;
+  // ── Source badge helper ───────────────────────────────────────
+  function SourceBadge({ field }: { field: string }) {
+    const src = prefillSource[field];
+    if (!src) return null;
+    const config = {
+      chain:    { label: 'from chain',    color: '#00d4ff' },
+      supabase: { label: 'from history',  color: '#00ffcc' },
+      new:      { label: 'new wallet',    color: '#6b7fa3' },
+    }[src];
+    return (
+      <span className="text-[10px] px-1.5 py-0.5 rounded-md font-mono"
+        style={{ background: `${config.color}15`, color: config.color, border: `1px solid ${config.color}30` }}>
+        {config.label}
+      </span>
+    );
+  }
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-8">
 
       {/* Header */}
       <div>
-        <h1
-          className="text-3xl font-bold text-zero-text mb-2"
-          style={{ fontFamily: "'Syne', sans-serif" }}
-        >
+        <h1 className="text-3xl font-bold text-zero-text mb-2" style={{ fontFamily: "'Syne', sans-serif" }}>
           Credit Score
         </h1>
         <p className="text-zero-text-dim">
@@ -186,93 +286,61 @@ export default function CreditPage() {
 
       {/* Current score card */}
       {creditScore !== null && tierInfo && (
-        <div
-          className="rounded-3xl p-8 relative overflow-hidden"
-          style={{
-            background: `linear-gradient(135deg, ${tierInfo.color}15, ${tierInfo.color}05)`,
-            border: `1px solid ${tierInfo.color}30`,
-          }}
-        >
-          <div
-            className="absolute top-0 right-0 w-64 h-64 opacity-10"
-            style={{ background: `radial-gradient(circle, ${tierInfo.color} 0%, transparent 70%)` }}
-          />
+        <div className="rounded-3xl p-8 relative overflow-hidden" style={{
+          background: `linear-gradient(135deg, ${tierInfo.color}15, ${tierInfo.color}05)`,
+          border:     `1px solid ${tierInfo.color}30`,
+        }}>
+          <div className="absolute top-0 right-0 w-64 h-64 opacity-10"
+            style={{ background: `radial-gradient(circle, ${tierInfo.color} 0%, transparent 70%)` }} />
           <div className="relative z-10">
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-sm text-zero-text-dim mb-2">Your Credit Score</p>
                 <div className="flex items-end gap-3 mb-1">
-                  <span
-                    className="text-6xl font-bold"
-                    style={{ fontFamily: "'Syne', sans-serif", color: tierInfo.color }}
-                  >
+                  <span className="text-6xl font-bold" style={{ fontFamily: "'Syne', sans-serif", color: tierInfo.color }}>
                     {creditScore}
                   </span>
                   <span className="text-zero-text-dim text-xl mb-2">/1000</span>
                 </div>
-                <div
-                  className="tag"
-                  style={{
-                    background: `${tierInfo.color}18`,
-                    borderColor: `${tierInfo.color}40`,
-                    color: tierInfo.color,
-                  }}
-                >
+                <div className="tag" style={{ background: `${tierInfo.color}18`, borderColor: `${tierInfo.color}40`, color: tierInfo.color }}>
                   <ShieldCheck size={10} />
                   Tier {creditTier} — {tierInfo.label}
                 </div>
               </div>
               <div className="text-right">
                 <p className="text-xs text-zero-text-dim mb-1">Max Loan</p>
-                <p
-                  className="text-2xl font-bold text-zero-text"
-                  style={{ fontFamily: "'Syne', sans-serif" }}
-                >
-                  ${tierInfo.maxLoan.toLocaleString()}
+                <p className="text-2xl font-bold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
+                  {tierInfo.maxLoan.toLocaleString()} ALEO
                 </p>
                 <p className="text-xs text-zero-text-dim mt-1">{tierInfo.rate}% APR</p>
               </div>
             </div>
 
-            {/* Score bar */}
             <div className="mt-6">
               <div className="progress-bar h-2">
-                <div
-                  className="progress-fill"
-                  style={{
-                    width: `${(creditScore / 1000) * 100}%`,
-                    background: `linear-gradient(90deg, ${tierInfo.color}, ${tierInfo.color}99)`,
-                  }}
-                />
+                <div className="progress-fill" style={{
+                  width:      `${(creditScore / 1000) * 100}%`,
+                  background: `linear-gradient(90deg, ${tierInfo.color}, ${tierInfo.color}99)`,
+                }} />
               </div>
               <div className="flex justify-between text-xs text-zero-text-dim mt-1">
-                <span>0</span>
-                <span>300</span>
-                <span>500</span>
-                <span>700</span>
-                <span>850</span>
-                <span>1000</span>
+                {['0', '300', '500', '700', '850', '1000'].map(n => <span key={n}>{n}</span>)}
               </div>
             </div>
 
-            {/* Private data toggle */}
-            <button
-              onClick={() => setShowRawData(!showRawData)}
-              className="flex items-center gap-2 mt-4 text-xs text-zero-text-dim hover:text-zero-text transition-colors"
-            >
+            <button onClick={() => setShowRawData(!showRawData)}
+              className="flex items-center gap-2 mt-4 text-xs text-zero-text-dim hover:text-zero-text transition-colors">
               {showRawData ? <EyeOff size={12} /> : <Eye size={12} />}
               {showRawData ? 'Hide private data' : 'Show private inputs (you only)'}
             </button>
 
             {showRawData && creditRecord && (
-              <div
-                className="mt-3 p-4 rounded-xl text-xs font-mono text-zero-text-dim space-y-1"
-                style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid #1a2540' }}
-              >
+              <div className="mt-3 p-4 rounded-xl text-xs font-mono text-zero-text-dim space-y-1"
+                style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid #1a2540' }}>
                 <p>wallet_age_days: <span className="text-zero-cyan">{creditRecord.wallet_age_days}</span></p>
                 <p>repayments_made: <span className="text-zero-teal">{creditRecord.repayments_made}</span></p>
-                <p>defaults: <span className="text-zero-red">{creditRecord.defaults}</span></p>
-                <p>total_volume: <span className="text-zero-violet-bright">{creditRecord.total_volume}</span></p>
+                <p>defaults:        <span className="text-zero-red">{creditRecord.defaults}</span></p>
+                <p>total_volume:    <span className="text-zero-violet-bright">{creditRecord.total_volume}</span></p>
                 <p className="text-zero-muted text-[10px] mt-2">
                   ↑ Visible only via your view key. The lending pool sees none of this.
                 </p>
@@ -286,88 +354,106 @@ export default function CreditPage() {
       <div className="grid md:grid-cols-2 gap-6">
 
         {/* Step 1: Oracle Attestation */}
-        <div
-          className="glass rounded-2xl p-6"
-          style={
-            creditScore !== null
-              ? { opacity: 0.5, pointerEvents: 'none' }
-              : {}
-          }
-        >
-          <div className="flex items-center gap-3 mb-6">
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
-              style={{
-                background: 'rgba(0,212,255,0.15)',
-                border: '1px solid rgba(0,212,255,0.3)',
-                fontFamily: "'Syne', sans-serif",
-                color: '#00d4ff',
-              }}
-            >
+        <div className="glass rounded-2xl p-6"
+          style={creditScore !== null ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
+
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+              style={{ background: 'rgba(0,212,255,0.15)', border: '1px solid rgba(0,212,255,0.3)', fontFamily: "'Syne', sans-serif", color: '#00d4ff' }}>
               1
             </div>
-            <div>
-              <h3
-                className="text-sm font-semibold text-zero-text"
-                style={{ fontFamily: "'Syne', sans-serif" }}
-              >
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
                 Oracle Attestation
               </h3>
               <p className="text-xs text-zero-text-dim">Submit credit data for ZK attestation</p>
             </div>
+            {/* Prefill status */}
+            {prefilling && (
+              <div className="flex items-center gap-1.5 text-xs text-zero-text-dim">
+                <Loader2 size={12} className="animate-spin" />
+                Loading…
+              </div>
+            )}
+            {prefillDone && !prefilling && (
+              <div className="flex items-center gap-1.5 text-xs text-zero-teal">
+                <CheckCircle size={12} />
+                Auto-filled
+              </div>
+            )}
           </div>
+
+          {/* Prefill info banner */}
+          {prefillDone && !prefilling && (
+            <div className="mb-4 p-3 rounded-xl flex items-start gap-2 text-xs"
+              style={{ background: 'rgba(0,212,255,0.05)', border: '1px solid rgba(0,212,255,0.12)' }}>
+              <Info size={12} className="text-zero-cyan mt-0.5 flex-shrink-0" />
+              <span className="text-zero-text-dim leading-relaxed">
+                Fields pre-filled from your on-chain wallet age and ZeroLend repayment history.
+                You can edit any value before attesting.
+              </span>
+            </div>
+          )}
+
+          {/* Not connected state */}
+          {!connected && (
+            <div className="mb-4 p-3 rounded-xl text-xs text-center text-zero-text-dim"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid #1a2540' }}>
+              Connect your wallet to auto-load your credit history
+            </div>
+          )}
 
           <div className="space-y-3">
             {[
-              { key: 'walletAgeDays',   label: 'Wallet Age (days)',       placeholder: 'e.g. 365'         },
-              { key: 'repaymentsMade',  label: 'Repayments Made',         placeholder: 'e.g. 5'           },
-              { key: 'defaults',        label: 'Defaults / Missed',       placeholder: 'e.g. 0'           },
-              { key: 'totalVolume',     label: 'Total Volume (micro-USDC)', placeholder: 'e.g. 10000000000' },
-            ].map(({ key, label, placeholder }) => (
+              { key: 'walletAgeDays',  label: 'Wallet Age (days)',  placeholder: '0', hint: 'Age of your Aleo wallet'           },
+              { key: 'repaymentsMade', label: 'Repayments Made',    placeholder: '0', hint: 'Loans repaid on ZeroLend'          },
+              { key: 'defaults',       label: 'Defaults / Missed',  placeholder: '0', hint: 'Loans liquidated on ZeroLend'      },
+              { key: 'totalVolume',    label: 'Total Volume (ALEO)', placeholder: '0', hint: 'Total ALEO borrowed and repaid'   },
+            ].map(({ key, label, placeholder, hint }) => (
               <div key={key}>
-                <label className="block text-xs text-zero-text-dim mb-1">{label}</label>
-                <input
-                  className="zero-input"
-                  type="number"
-                  placeholder={placeholder}
-                  value={form[key as keyof typeof form]}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, [key]: e.target.value }))
-                  }
-                />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-zero-text-dim">{label}</label>
+                  <SourceBadge field={key} />
+                </div>
+                <div className="relative">
+                  <input
+                    className={`zero-input ${key === 'totalVolume' ? 'pr-14' : ''} ${
+                      prefilling ? 'opacity-50' : ''
+                    }`}
+                    type="number"
+                    placeholder={prefilling ? 'Loading…' : placeholder}
+                    disabled={prefilling}
+                    value={form[key as keyof typeof form]}
+                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                  />
+                  {key === 'totalVolume' && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zero-text-dim text-xs">
+                      ALEO
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-zero-muted mt-0.5">{hint}</p>
               </div>
             ))}
           </div>
 
           {/* Score preview */}
           {score !== null && previewTier && (
-            <div
-              className="mt-4 p-3 rounded-xl flex items-center justify-between"
-              style={{
-                background: `${getTierInfo(previewTier).color}10`,
-                border: `1px solid ${getTierInfo(previewTier).color}25`,
-              }}
-            >
+            <div className="mt-4 p-3 rounded-xl flex items-center justify-between" style={{
+              background: `${getTierInfo(previewTier).color}10`,
+              border:     `1px solid ${getTierInfo(previewTier).color}25`,
+            }}>
               <span className="text-xs text-zero-text-dim">Preview Score</span>
               <div className="flex items-center gap-2">
-                <span
-                  className="text-lg font-bold"
-                  style={{
-                    fontFamily: "'Syne', sans-serif",
-                    color: getTierInfo(previewTier).color,
-                  }}
-                >
+                <span className="text-lg font-bold" style={{ fontFamily: "'Syne', sans-serif", color: getTierInfo(previewTier).color }}>
                   {score}
                 </span>
-                <span
-                  className="tag"
-                  style={{
-                    background: `${getTierInfo(previewTier).color}18`,
-                    borderColor: `${getTierInfo(previewTier).color}40`,
-                    color: getTierInfo(previewTier).color,
-                    fontSize: 10,
-                  }}
-                >
+                <span className="tag" style={{
+                  background:  `${getTierInfo(previewTier).color}18`,
+                  borderColor: `${getTierInfo(previewTier).color}40`,
+                  color:       getTierInfo(previewTier).color,
+                  fontSize:    10,
+                }}>
                   T{previewTier}
                 </span>
               </div>
@@ -376,11 +462,13 @@ export default function CreditPage() {
 
           <button
             onClick={handleAttest}
-            disabled={step === 'attesting' || !form.walletAgeDays}
+            disabled={step === 'attesting' || prefilling || !connected || form.walletAgeDays === ''}
             className="btn-primary w-full mt-4 flex items-center justify-center gap-2"
           >
             {step === 'attesting' ? (
               <><div className="zk-loader" style={{ width: 14, height: 14 }} />Attesting…</>
+            ) : prefilling ? (
+              <><Loader2 size={14} className="animate-spin" />Loading history…</>
             ) : (
               <><Shield size={14} />Attest Credit Data</>
             )}
@@ -391,31 +479,20 @@ export default function CreditPage() {
         <div className="space-y-4">
 
           {/* Step 2: Redeem */}
-          <div
-            className="glass rounded-2xl p-5"
-            style={
-              step !== 'redeeming' && creditScore === null
-                ? { opacity: 0.4, pointerEvents: 'none' }
-                : {}
-            }
-          >
+          <div className="glass rounded-2xl p-5"
+            style={step !== 'redeeming' && creditScore === null ? { opacity: 0.4, pointerEvents: 'none' } : {}}>
             <div className="flex items-center gap-3 mb-4">
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
                 style={{
-                  background: step === 'redeeming' ? 'rgba(0,212,255,0.15)' : 'rgba(255,255,255,0.05)',
-                  border: `1px solid ${step === 'redeeming' ? 'rgba(0,212,255,0.3)' : '#1a2540'}`,
-                  fontFamily: "'Syne', sans-serif",
-                  color: step === 'redeeming' ? '#00d4ff' : '#4a5878',
-                }}
-              >
+                  background:  step === 'redeeming' ? 'rgba(0,212,255,0.15)' : 'rgba(255,255,255,0.05)',
+                  border:      `1px solid ${step === 'redeeming' ? 'rgba(0,212,255,0.3)' : '#1a2540'}`,
+                  fontFamily:  "'Syne', sans-serif",
+                  color:       step === 'redeeming' ? '#00d4ff' : '#4a5878',
+                }}>
                 2
               </div>
               <div>
-                <h3
-                  className="text-sm font-semibold text-zero-text"
-                  style={{ fontFamily: "'Syne', sans-serif" }}
-                >
+                <h3 className="text-sm font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
                   Mint Credit Record
                 </h3>
                 <p className="text-xs text-zero-text-dim">Redeem attestation → private record</p>
@@ -441,29 +518,20 @@ export default function CreditPage() {
           </div>
 
           {/* Step 3: Prove tier */}
-          <div
-            className="glass rounded-2xl p-5"
-            style={
-              creditScore === null ? { opacity: 0.4, pointerEvents: 'none' } : {}
-            }
-          >
+          <div className="glass rounded-2xl p-5"
+            style={creditScore === null ? { opacity: 0.4, pointerEvents: 'none' } : {}}>
             <div className="flex items-center gap-3 mb-4">
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
                 style={{
-                  background: creditScore !== null ? 'rgba(124,58,237,0.2)' : 'rgba(255,255,255,0.05)',
-                  border: `1px solid ${creditScore !== null ? 'rgba(124,58,237,0.4)' : '#1a2540'}`,
-                  fontFamily: "'Syne', sans-serif",
-                  color: creditScore !== null ? '#a855f7' : '#4a5878',
-                }}
-              >
+                  background:  creditScore !== null ? 'rgba(124,58,237,0.2)' : 'rgba(255,255,255,0.05)',
+                  border:      `1px solid ${creditScore !== null ? 'rgba(124,58,237,0.4)' : '#1a2540'}`,
+                  fontFamily:  "'Syne', sans-serif",
+                  color:       creditScore !== null ? '#a855f7' : '#4a5878',
+                }}>
                 3
               </div>
               <div>
-                <h3
-                  className="text-sm font-semibold text-zero-text"
-                  style={{ fontFamily: "'Syne', sans-serif" }}
-                >
+                <h3 className="text-sm font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
                   Generate Tier Proof
                 </h3>
                 <p className="text-xs text-zero-text-dim">Create ZK proof for lending pool</p>
@@ -471,9 +539,7 @@ export default function CreditPage() {
             </div>
 
             <div className="mb-4">
-              <label className="block text-xs text-zero-text-dim mb-1">
-                Proof valid for (blocks)
-              </label>
+              <label className="block text-xs text-zero-text-dim mb-1">Proof valid for (blocks)</label>
               <input
                 className="zero-input"
                 type="number"
@@ -504,10 +570,7 @@ export default function CreditPage() {
       {/* Tier table */}
       <div className="glass rounded-2xl overflow-hidden">
         <div className="px-6 py-4 border-b border-zero-border/50">
-          <h3
-            className="text-base font-semibold text-zero-text"
-            style={{ fontFamily: "'Syne', sans-serif" }}
-          >
+          <h3 className="text-base font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
             Credit Tiers
           </h3>
         </div>
@@ -516,36 +579,23 @@ export default function CreditPage() {
             <thead>
               <tr className="border-b border-zero-border/30">
                 {['Tier', 'Label', 'Score Range', 'Max Loan', 'APR', 'Term'].map((h) => (
-                  <th key={h} className="px-6 py-3 text-left text-xs text-zero-text-dim font-medium">
-                    {h}
-                  </th>
+                  <th key={h} className="px-6 py-3 text-left text-xs text-zero-text-dim font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {[
-                { tier: 1, label: 'Poor',      range: '0–299',    max: '$100',    rate: '20%', term: '2 days'  },
-                { tier: 2, label: 'Fair',      range: '300–499',  max: '$500',    rate: '15%', term: '5 days'  },
-                { tier: 3, label: 'Good',      range: '500–699',  max: '$2,000',  rate: '10%', term: '10 days' },
-                { tier: 4, label: 'Great',     range: '700–849',  max: '$10,000', rate: '7%',  term: '20 days' },
-                { tier: 5, label: 'Excellent', range: '850–1000', max: '$50,000', rate: '4%',  term: '30 days' },
+                { tier: 1, label: 'Poor',      range: '0–299',    max: '10 ALEO',    rate: '20%', term: '2 days'  },
+                { tier: 2, label: 'Fair',       range: '300–499',  max: '50 ALEO',    rate: '15%', term: '5 days'  },
+                { tier: 3, label: 'Good',       range: '500–699',  max: '200 ALEO',   rate: '10%', term: '10 days' },
+                { tier: 4, label: 'Great',      range: '700–849',  max: '1,000 ALEO', rate: '7%',  term: '20 days' },
+                { tier: 5, label: 'Excellent',  range: '850–1000', max: '5,000 ALEO', rate: '4%',  term: '30 days' },
               ].map(({ tier, label, range, max, rate, term }) => (
-                <tr
-                  key={tier}
+                <tr key={tier}
                   className="border-b border-zero-border/20 hover:bg-white/[0.02] transition-colors"
-                  style={
-                    creditTier === tier
-                      ? { background: `${getTierInfo(tier).color}08` }
-                      : {}
-                  }
-                >
+                  style={creditTier === tier ? { background: `${getTierInfo(tier).color}08` } : {}}>
                   <td className="px-6 py-4">
-                    <span
-                      className={`tag tier-${tier}`}
-                      style={{ fontFamily: "'Syne', sans-serif" }}
-                    >
-                      T{tier}
-                    </span>
+                    <span className={`tag tier-${tier}`} style={{ fontFamily: "'Syne', sans-serif" }}>T{tier}</span>
                   </td>
                   <td className="px-6 py-4 font-medium text-zero-text">{label}</td>
                   <td className="px-6 py-4 font-mono text-zero-text-dim">{range}</td>

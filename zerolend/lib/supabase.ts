@@ -147,3 +147,19 @@ export async function getTransactionHistory(address: string) {
     .order('created_at', { ascending: false })
     .limit(20);
 }
+
+export async function getUserLoanHistory(address: string) {
+  const { data } = await supabase
+    .from('loans')
+    .select('principal, status')
+    .eq('borrower_address', address);
+
+  const loans = data ?? [];
+  return {
+    repaidCount:             loans.filter(l => l.status === 'repaid').length,
+    liquidatedCount:         loans.filter(l => l.status === 'liquidated').length,
+    totalRepaidVolumeMicro:  loans
+      .filter(l => l.status === 'repaid')
+      .reduce((sum, l) => sum + (l.principal ?? 0), 0),
+  };
+}

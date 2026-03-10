@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import type {
   WalletState, PoolStats, CreditRecord,
   LoanRecord, LenderDeposit, TransactionStatus
-} from '@/types';
+} from '../types';
 
 interface ZeroLendStore {
   // Wallet

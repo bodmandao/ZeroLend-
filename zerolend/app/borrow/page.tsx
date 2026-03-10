@@ -6,58 +6,67 @@ import {
   TrendingUp, Shield, AlertTriangle, CheckCircle,
   ChevronRight, Zap, Clock, DollarSign, Lock
 } from 'lucide-react';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { useStore } from '../../lib/store';
 import {
-  getTierInfo, randomField, formatUsdc, usdcToMicro,
-  microToUsdc, computeInterest, executeTransaction,
-  PROGRAM_ID, buildTierProof, buildLoanRecord, TIERS
+  getTierInfo, randomField, formatAleo, aleoToMicro,
+  microToAleo, computeInterest, executeTransaction,
+  PROGRAM_ID, buildTierProof, buildCreditRecord,
+  buildCreditsRecord, TIERS
 } from '../../lib/aleo';
 import { insertLoan } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 export default function BorrowPage() {
+  const { wallet: walletAdapter } = useWallet();
   const {
     wallet, creditScore, creditTier, tierProof,
-    setTierProof, addLoan, addTransaction
+    creditRecord, setTierProof, addLoan, addTransaction
   } = useStore();
 
-  const [amount, setAmount]     = useState('');
-  const [step, setStep]         = useState<'idle' | 'proving' | 'requesting' | 'done'>('idle');
+  const [amount, setAmount]         = useState('');
+  const [step, setStep]             = useState<'idle' | 'proving' | 'requesting' | 'done'>('idle');
   const [activeLoan, setActiveLoan] = useState<any>(null);
 
-  const tierInfo = creditTier ? getTierInfo(creditTier) : null;
-  const maxLoan  = tierInfo?.maxLoan ?? 0;
-  const rate     = tierInfo ? TIERS[creditTier as keyof typeof TIERS].rate : 0;
-  const amtNum   = parseFloat(amount) || 0;
-  const amtMicro = usdcToMicro(amtNum);
+  const tierInfo  = creditTier ? getTierInfo(creditTier) : null;
+  const maxLoan   = tierInfo?.maxLoan ?? 0;            // in ALEO
+  const rate      = tierInfo ? TIERS[creditTier as keyof typeof TIERS].rate : 0;
+  const amtNum    = parseFloat(amount) || 0;           // in ALEO
+  const amtMicro  = aleoToMicro(amtNum);               // microcredits u64
 
-  // Estimate interest for ~100 blocks (~16 min)
-  const rateBps   = tierInfo ? [2000,1500,1000,700,400][creditTier! - 1] : 1000;
-  const estInterest = microToUsdc(computeInterest(amtMicro, rateBps, 100));
+  // Estimate interest for ~100 blocks (~16 min at 10s/block)
+  const rateBps     = tierInfo ? [2000, 1500, 1000, 700, 400][creditTier! - 1] : 1000;
+  const estInterest = microToAleo(computeInterest(amtMicro, rateBps, 100));
   const totalRepay  = amtNum + estInterest;
 
   const loanPct = maxLoan > 0 ? Math.min((amtNum / maxLoan) * 100, 100) : 0;
 
+  // ── Generate tier proof ──────────────────────────────────────
   async function handleProveTier() {
     if (!creditTier || !wallet.address || !creditScore) {
       toast.error('No credit record found. Visit the Credit page first.');
       return;
     }
+    if (!creditRecord) {
+      toast.error('Credit record not found in store. Re-mint your credit record first.');
+      return;
+    }
     setStep('proving');
     try {
       const pNonce = randomField();
+
       await executeTransaction({
         programId:    PROGRAM_ID,
         functionName: 'prove_tier',
         inputs: [
-          // Reconstructed credit record from store
-          `{owner: ${wallet.address}, wallet_age_days: 365u32, repayments_made: 5u32, defaults: 0u32, total_volume: 10000000000u128, current_score: ${creditScore}u32, last_updated: 100u32, nonce: ${randomField()}}`,
+          creditRecord,   // private CreditRecord from store
           pNonce,
-          '200u32',
-          '100u32',
-          '1field',
+          '200u32',       // expires_in blocks
+          '100u32',       // current_block live block 
+          '1field',       // org_id
         ],
-      });
+      }, walletAdapter);
+
       const proofStr = buildTierProof(wallet.address, creditTier, '1field', 300, pNonce);
       setTierProof(proofStr);
       toast.success('Tier proof ready!');
@@ -68,37 +77,44 @@ export default function BorrowPage() {
     }
   }
 
+  // ── Request loan ─────────────────────────────────────────────
   async function handleRequestLoan() {
     if (!tierProof || !wallet.address) return;
     if (amtNum <= 0 || amtNum > maxLoan) {
-      toast.error(`Amount must be between $1 and $${maxLoan.toLocaleString()}`);
+      toast.error(`Amount must be between 0.01 and ${maxLoan.toLocaleString()} ALEO`);
+      return;
+    }
+    if (!wallet.poolCreditsRecord) {
+      toast.error('Pool credits record not available. Contact admin.');
       return;
     }
     setStep('requesting');
     try {
       const loanId    = randomField();
       const loanNonce = randomField();
+      const currentBlk = 100; // replace with live block in prod
 
       const txId = await executeTransaction({
         programId:    PROGRAM_ID,
         functionName: 'request_loan',
         inputs: [
           tierProof,
-          `${amtMicro}u128`,
-          '100u32',
+          wallet.poolCreditsRecord,   // credits.aleo/credits owned by pool
+          `${amtMicro}u64`,           
+          `${currentBlk}u32`,
           loanNonce,
           loanId,
         ],
-      });
+      }, walletAdapter);
 
+      // Build local loan record 
       const loan: any = {
         owner:          wallet.address,
         loan_id:        loanId,
-        token_id:       '1field',
-        principal:      `${amtMicro}u128`,
+        principal:      `${amtMicro}u64`,
         interest_rate:  `${rateBps}u64`,
-        borrowed_block: '100u32',
-        due_block:      '86500u32',
+        borrowed_block: `${currentBlk}u32`,
+        due_block:      `${currentBlk + 86400}u32`,
         tier_at_borrow: `${creditTier}u8`,
         nonce:          loanNonce,
       };
@@ -110,7 +126,7 @@ export default function BorrowPage() {
         interest_rate:    rateBps,
         tier:             creditTier!,
         borrowed_at:      new Date().toISOString(),
-        due_at_block:     86500,
+        due_at_block:     currentBlk + 86400,
         tx_id:            txId,
       });
 
@@ -119,13 +135,13 @@ export default function BorrowPage() {
         id:        loanId,
         type:      'request_loan',
         status:    'confirmed',
-        message:   `Borrowed ${formatUsdc(amtMicro)}`,
+        message:   `Borrowed ${formatAleo(amtMicro)}`,
         txId,
         timestamp: Date.now(),
       });
 
       setActiveLoan({ loan, amtMicro, txId });
-      toast.success(`Loan of ${formatUsdc(amtMicro)} issued!`);
+      toast.success(`Loan of ${formatAleo(amtMicro)} issued!`);
       setStep('done');
     } catch (e: any) {
       toast.error(e.message ?? 'Loan request failed');
@@ -133,7 +149,7 @@ export default function BorrowPage() {
     }
   }
 
-  // No credit score
+  // ── No credit score guard ────────────────────────────────────
   if (!creditScore || !creditTier) {
     return (
       <div className="p-6 max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[60vh] text-center">
@@ -167,13 +183,10 @@ export default function BorrowPage() {
 
       {/* Success state */}
       {step === 'done' && activeLoan && (
-        <div
-          className="rounded-2xl p-6"
-          style={{
-            background: 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(0,212,255,0.05))',
-            border: '1px solid rgba(16,185,129,0.3)',
-          }}
-        >
+        <div className="rounded-2xl p-6" style={{
+          background: 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(0,212,255,0.05))',
+          border: '1px solid rgba(16,185,129,0.3)',
+        }}>
           <div className="flex items-center gap-3 mb-4">
             <CheckCircle size={24} className="text-zero-green" />
             <h3 className="text-lg font-bold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
@@ -184,7 +197,7 @@ export default function BorrowPage() {
             <div>
               <p className="text-zero-text-dim text-xs mb-1">Amount</p>
               <p className="text-zero-text font-bold" style={{ fontFamily: "'Syne', sans-serif" }}>
-                {formatUsdc(activeLoan.amtMicro)}
+                {formatAleo(activeLoan.amtMicro)}
               </p>
             </div>
             <div>
@@ -197,7 +210,7 @@ export default function BorrowPage() {
             </div>
           </div>
           <p className="text-xs text-zero-text-dim mt-3">
-            USDC has been deposited to your private wallet record.
+            ALEO credits have been deposited to your private wallet record.
             Your loan details are visible only to you.
           </p>
         </div>
@@ -215,19 +228,11 @@ export default function BorrowPage() {
                 ZK Tier Proof
               </h3>
               {tierProof ? (
-                <span className="tag" style={{
-                  background: 'rgba(16,185,129,0.12)',
-                  borderColor: 'rgba(16,185,129,0.3)',
-                  color: '#10b981',
-                }}>
+                <span className="tag" style={{ background: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.3)', color: '#10b981' }}>
                   <CheckCircle size={10} /> Valid
                 </span>
               ) : (
-                <span className="tag" style={{
-                  background: 'rgba(245,158,11,0.12)',
-                  borderColor: 'rgba(245,158,11,0.3)',
-                  color: '#f59e0b',
-                }}>
+                <span className="tag" style={{ background: 'rgba(245,158,11,0.12)', borderColor: 'rgba(245,158,11,0.3)', color: '#f59e0b' }}>
                   <Clock size={10} /> Required
                 </span>
               )}
@@ -258,19 +263,21 @@ export default function BorrowPage() {
             </h3>
 
             <div className="relative mb-3">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zero-text-dim font-semibold">$</span>
               <input
-                className="zero-input pl-8"
+                className="zero-input pr-16"
                 type="number"
                 placeholder="0.00"
                 value={amount}
-                min={1}
+                min={0.01}
                 max={maxLoan}
                 onChange={(e) => setAmount(e.target.value)}
               />
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zero-text-dim text-xs font-semibold">
+                ALEO
+              </span>
             </div>
 
-            {/* Quick amounts */}
+            {/* Quick % buttons */}
             <div className="flex gap-2 mb-4">
               {[25, 50, 75, 100].map((pct) => (
                 <button
@@ -307,18 +314,13 @@ export default function BorrowPage() {
               <div className="flex items-center gap-2 text-xs text-zero-red mb-3 p-2 rounded-lg"
                 style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
                 <AlertTriangle size={12} />
-                Exceeds your tier limit of ${maxLoan.toLocaleString()}
+                Exceeds your tier limit of {maxLoan.toLocaleString()} ALEO
               </div>
             )}
 
             <button
               onClick={handleRequestLoan}
-              disabled={
-                !tierProof ||
-                amtNum <= 0 ||
-                amtNum > maxLoan ||
-                step === 'requesting'
-              }
+              disabled={!tierProof || amtNum <= 0 || amtNum > maxLoan || step === 'requesting'}
               className="btn-primary w-full flex items-center justify-center gap-2"
             >
               {step === 'requesting' ? (
@@ -330,33 +332,20 @@ export default function BorrowPage() {
           </div>
         </div>
 
-        {/* Loan summary sidebar */}
+        {/* Sidebar */}
         <div className="lg:col-span-2 space-y-4">
 
-          {/* Your tier card */}
-          <div
-            className="rounded-2xl p-5"
-            style={{
-              background: `linear-gradient(135deg, ${tierInfo!.color}12, ${tierInfo!.color}05)`,
-              border: `1px solid ${tierInfo!.color}25`,
-            }}
-          >
+          {/* Tier card */}
+          <div className="rounded-2xl p-5" style={{
+            background: `linear-gradient(135deg, ${tierInfo!.color}12, ${tierInfo!.color}05)`,
+            border: `1px solid ${tierInfo!.color}25`,
+          }}>
             <p className="text-xs text-zero-text-dim mb-2">Your Tier</p>
             <div className="flex items-center justify-between mb-3">
-              <span
-                className="text-xl font-bold"
-                style={{ fontFamily: "'Syne', sans-serif", color: tierInfo!.color }}
-              >
+              <span className="text-xl font-bold" style={{ fontFamily: "'Syne', sans-serif", color: tierInfo!.color }}>
                 {tierInfo!.label}
               </span>
-              <span
-                className="tag"
-                style={{
-                  background: `${tierInfo!.color}18`,
-                  borderColor: `${tierInfo!.color}40`,
-                  color: tierInfo!.color,
-                }}
-              >
+              <span className="tag" style={{ background: `${tierInfo!.color}18`, borderColor: `${tierInfo!.color}40`, color: tierInfo!.color }}>
                 T{creditTier}
               </span>
             </div>
@@ -367,7 +356,7 @@ export default function BorrowPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-zero-text-dim">Max Loan</span>
-                <span className="text-zero-text">${maxLoan.toLocaleString()}</span>
+                <span className="text-zero-text">{maxLoan.toLocaleString()} ALEO</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-zero-text-dim">Interest Rate</span>
@@ -383,9 +372,9 @@ export default function BorrowPage() {
             </h3>
             <div className="space-y-3 text-xs">
               {[
-                { label: 'Principal',     value: amtNum > 0 ? `$${amtNum.toFixed(2)}` : '—' },
-                { label: 'Est. Interest', value: amtNum > 0 ? `$${estInterest.toFixed(4)}` : '—' },
-                { label: 'Total Repay',   value: amtNum > 0 ? `$${totalRepay.toFixed(4)}` : '—', bold: true },
+                { label: 'Principal',     value: amtNum > 0 ? `${amtNum.toFixed(4)} ALEO` : '—' },
+                { label: 'Est. Interest', value: amtNum > 0 ? `${estInterest.toFixed(6)} ALEO` : '—' },
+                { label: 'Total Repay',   value: amtNum > 0 ? `${totalRepay.toFixed(4)} ALEO` : '—', bold: true },
               ].map(({ label, value, bold }) => (
                 <div key={label} className="flex justify-between items-center">
                   <span className="text-zero-text-dim">{label}</span>
@@ -406,13 +395,7 @@ export default function BorrowPage() {
           </div>
 
           {/* Privacy note */}
-          <div
-            className="rounded-xl p-4"
-            style={{
-              background: 'rgba(0,212,255,0.05)',
-              border: '1px solid rgba(0,212,255,0.12)',
-            }}
-          >
+          <div className="rounded-xl p-4" style={{ background: 'rgba(0,212,255,0.05)', border: '1px solid rgba(0,212,255,0.12)' }}>
             <div className="flex items-center gap-2 mb-2">
               <Lock size={12} className="text-zero-cyan" />
               <span className="text-xs font-semibold text-zero-cyan" style={{ fontFamily: "'Syne', sans-serif" }}>
