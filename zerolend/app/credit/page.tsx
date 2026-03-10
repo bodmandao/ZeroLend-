@@ -11,7 +11,7 @@ import {
   computeCreditScore, scoreToTier, getTierInfo,
   randomField, executeTransaction, PROGRAM_ID,
   buildOracleAttestation, aleoToMicro, microToAleo,
-  getWalletBalance, API_URL
+  getWalletBalance
 } from '../../lib/aleo';
 import {
   insertAttestation, markAttestationRedeemed,
@@ -19,27 +19,40 @@ import {
 } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
+const PROVABLE_API = 'https://api.provable.com/v2';
 
-// ── Wallet age helper ─────────────────────────────────────────
-// Fetches the earliest transaction for a wallet from the Aleo explorer
-// and returns age in days. Falls back to 0 if not found.
 async function fetchWalletAgeDays(address: string): Promise<number> {
   try {
-    const res = await fetch(
-      `${API_URL}/testnet/address/${address}/transitions?page=0&limit=1&order=asc`
-    );
-    if (!res.ok) return 0;
-    const data = await res.json();
-    const transitions = data?.transitions ?? data?.result ?? data;
-    if (!Array.isArray(transitions) || transitions.length === 0) return 0;
+    let cursor: string | null = null;
+    let oldestTimestamp: number | null = null;
 
-    const earliest = transitions[0];
-    // block_height → estimate timestamp (testnet ~10s/block, genesis ~Jan 2024)
-    const genesisTs  = 1704067200000; // Jan 1 2024 UTC (approx testnet genesis)
-    const blockTime  = 10_000;        // 10s per block in ms
-    const blockHeight: number = earliest.block_height ?? earliest.height ?? 0;
-    const estimatedTs = genesisTs + blockHeight * blockTime;
-    const ageMs = Date.now() - estimatedTs;
+    for (let page = 0; page < 10; page++) {
+      const base = `${PROVABLE_API}/testnet/transactions/address/${address}`;
+      const url  = cursor ? `${base}?cursor=${cursor}` : base;
+
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) break;
+
+      const data = await res.json();
+      const txs: any[] = data?.transactions ?? [];
+      if (txs.length === 0) break;
+
+      // Last item on each page is the oldest on that page
+      const lastTx = txs[txs.length - 1];
+      const ts = parseInt(lastTx?.block_timestamp ?? '0');
+      if (ts > 0) oldestTimestamp = ts;
+
+      // next_cursor moves toward older transactions
+      const nextCursor = data?.next_cursor;
+      if (!nextCursor?.transition_id) break;
+      cursor = nextCursor.transition_id;
+    }
+
+    if (!oldestTimestamp) return 0;
+
+    // block_timestamp is Unix seconds
+    const ageMs = Date.now() - oldestTimestamp * 1000;
+    console.log(ageMs,'some')
     return Math.max(0, Math.floor(ageMs / (1000 * 60 * 60 * 24)));
   } catch {
     return 0;
@@ -57,7 +70,7 @@ export default function CreditPage() {
     walletAgeDays:  '',
     repaymentsMade: '',
     defaults:       '',
-    totalVolume:    '',  // whole ALEO units — converted to microcredits on submit
+    totalVolume:    '', 
   });
 
   const [prefilling, setPrefilling]       = useState(false);
@@ -71,22 +84,18 @@ export default function CreditPage() {
 
   // ── Auto-prefill when wallet connects ────────────────────────
   useEffect(() => {
-    if (!connected || prefillDone) return;
+    if (!connected || !address || prefillDone) return;
     prefillForm(address);
   }, [connected, address]);
 
   async function prefillForm(address: string) {
     setPrefilling(true);
-    console.log('check1')
     try {
-    console.log('check2')
-
-      // 1. Wallet age — from Aleo chain explorer
+      // Wallet age — from Aleo chain explorer
       const ageDays = await fetchWalletAgeDays(address);
 
-      // 2. Loan history — from Supabase (ZeroLend's own records)
+      // Loan history — from Supabase 
       const history = await getUserLoanHistory(address);
-      //  history shape: { repaidCount, liquidatedCount, totalRepaidVolumeMicro }
 
       const sources: Record<string, 'chain' | 'supabase' | 'new'> = {
         walletAgeDays:  ageDays > 0         ? 'chain'    : 'new',
@@ -135,7 +144,7 @@ export default function CreditPage() {
 
   // ── Step 1: Oracle Attestation ────────────────────────────────
   async function handleAttest() {
-    if (!wallet.connected || !wallet.address) {
+    if (!connected || !address) {
       toast.error('Connect your wallet first');
       return;
     }
@@ -152,7 +161,7 @@ export default function CreditPage() {
       const tier          = scoreToTier(computedScore);
 
       await insertAttestation({
-        user_address:    wallet.address,
+        user_address:    address,
         attestation_id:  attId,
         wallet_age_days: age,
         repayments_made: reps,
@@ -166,7 +175,7 @@ export default function CreditPage() {
         programId:    PROGRAM_ID,
         functionName: 'attest_credit',
         inputs: [
-          wallet.address,
+          address,
           `${age}u32`,
           `${reps}u32`,
           `${defs}u32`,
@@ -195,8 +204,8 @@ export default function CreditPage() {
       const att   = attestation;
 
       const attRecord = buildOracleAttestation(
-        wallet.address!,
-        wallet.address!,
+        address!,
+        address!,
         att.age, att.reps, att.defs, att.vol,
         600, att.attId
       );
@@ -210,7 +219,7 @@ export default function CreditPage() {
       await markAttestationRedeemed(att.attId);
 
       const creditRec: any = {
-        owner:           wallet.address,
+        owner:           address,
         wallet_age_days: `${att.age}u32`,
         repayments_made: `${att.reps}u32`,
         defaults:        `${att.defs}u32`,
@@ -231,7 +240,7 @@ export default function CreditPage() {
 
   // ── Step 3: Prove Tier ────────────────────────────────────────
   async function handleProveTier() {
-    if (!creditRecord || !wallet.address) return;
+    if (!creditRecord || !address) return;
     setStep('proving');
     try {
       const pNonce = randomField();
@@ -244,7 +253,7 @@ export default function CreditPage() {
         inputs:       [rec, pNonce, `${expiry}u32`, '100u32', '1field'],
       }, walletAdapter);
 
-      const proofStr = `{owner: ${wallet.address}, tier: ${creditTier}u8, org_id: 1field, expires_at: ${100 + expiry}u32, nonce: ${pNonce}}`;
+      const proofStr = `{owner: ${address}, tier: ${creditTier}u8, org_id: 1field, expires_at: ${100 + expiry}u32, nonce: ${pNonce}}`;
       setTierProof(proofStr);
       toast.success('Tier proof generated! Ready to borrow.');
       setStep('done');
