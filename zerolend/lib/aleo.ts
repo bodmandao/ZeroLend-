@@ -1,9 +1,9 @@
-export const PROGRAM_ID   = 'zerolend_lending_pool_v1.aleo';
-export const NETWORK      = 'testnet';
-export const API_URL      = 'https://api.explorer.provable.com/v2';
-export const ORG_ID       = '1field';
+export const PROGRAM_ID = 'zerolend_lending_pool_v1.aleo';
+export const NETWORK    = 'testnet';
+export const API_URL    = 'https://api.explorer.provable.com/v2';
+export const ORG_ID     = '1field';
 
-// ── Tier definitions  ──────────────
+// ── Tier definitions ──────────────────────────────────────────
 export const TIERS = {
   1: { label: 'Poor',      color: '#ef4444', maxLoan: 10,    rate: 20, minScore: 0   },
   2: { label: 'Fair',      color: '#f59e0b', maxLoan: 50,    rate: 15, minScore: 300 },
@@ -21,7 +21,7 @@ export function computeCreditScore(
 ): number {
   const agePts  = Math.min(walletAgeDays * 2, 200);
   const repPts  = Math.min(repaymentsMade * 10, 400);
-  const volPts  = Math.min(Math.floor(totalVolume / 1_000_000), 200); // 1pt per ALEO
+  const volPts  = Math.min(Math.floor(totalVolume / 1_000_000), 200);
   const penalty = defaults * 100;
   const raw     = 200 + agePts + repPts + volPts;
   return Math.min(Math.max(raw - penalty, 0), 1000);
@@ -43,7 +43,7 @@ export function computeInterest(
   return Math.floor((principal * rateBps * blocksHeld) / 10_000_000);
 }
 
-// ── Unit helpers (microcredits ↔ ALEO) ────────────────────────
+// ── Unit helpers ──────────────────────────────────────────────
 export function microToAleo(micro: number): number {
   return micro / 1_000_000;
 }
@@ -78,7 +78,7 @@ export function randomU32(): number {
   return Math.floor(Math.random() * 2_000_000);
 }
 
-// ── Wallet balance (from credits.aleo native mapping) ─────────
+// ── Wallet balance ────────────────────────────────────────────
 export async function getWalletBalance(address: string): Promise<number> {
   try {
     const res = await fetch(
@@ -91,58 +91,70 @@ export async function getWalletBalance(address: string): Promise<number> {
   }
 }
 
-// Fetch current block height from the Aleo network
+// ── Current block height ──────────────────────────────────────
 export async function getCurrentBlockHeight(): Promise<number> {
   try {
     const res = await fetch(`${API_URL}/testnet/block/height/latest`);
     if (!res.ok) return 0;
     const data = await res.json();
-    // Returns a plain number e.g. 14976140
     return typeof data === 'number' ? data : parseInt(data) || 0;
   } catch {
     return 0;
   }
 }
 
+// ── Transaction execution ─────────────────────────────────────
+// executeHandler  = executeTransaction from useWallet()
+// transactionStatus = transactionStatus from useWallet()
+export interface ExecuteParams {
+  programId:    string;
+  functionName: string;
+  inputs:       string[];
+  fee?:         number;
+  privateFee?:  boolean;
+}
+
 export async function executeTransaction(
-  params:  any,
-  executeHandler:  any,
-  transactionStatus : any
+  params:            ExecuteParams,
+  executeHandler:    (p: any) => Promise<any>,
+  transactionStatus: (id: string) => Promise<any>
 ): Promise<string> {
-  
   if (!executeHandler) throw new Error('Wallet not connected');
 
-  const { programId, functionName: fn, inputs, fee = 200000, privateFee = false } = params;
-console.log(params)
-  // 1. Submit — returns a temp/pending tx id
+  const { programId, functionName, inputs, fee = 200_000, privateFee = false } = params;
+
+  console.log('[execute]', programId, functionName, inputs);
+
   const raw = await executeHandler({
-    program : programId,
-    function: fn,
+    program:     programId,
+    function:    functionName,
     inputs,
     fee,
     privateFee,
   });
 
-  console.log('Raw transaction response:', raw);
+  console.log('[execute] raw response:', raw);
+
   const tempTxId: string = typeof raw === 'string' ? raw : raw?.transactionId;
   if (!tempTxId) throw new Error('No transaction ID returned from wallet');
 
-  // 2. Poll until Accepted (or throw on failure)
   const finalTxId = await pollTransaction(tempTxId, transactionStatus);
   return finalTxId;
 }
 
-/**
- * Poll a pending transaction every 2s until status === 'Accepted'.
- * Rejects on any non-pending / non-accepted status.
- */
-export function pollTransaction(tempTxId: string, transactionStatus: any): Promise<string> {
+// ── Poll until Accepted ───────────────────────────────────────
+export function pollTransaction(
+  tempTxId:          string,
+  transactionStatus: (id: string) => Promise<any>
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const interval = setInterval(async () => {
       try {
         const status = await transactionStatus?.(tempTxId);
-        if (!status) return; // still pending, keep polling
-        console.log(`Transaction ${tempTxId} status: ${status.status}`);
+        if (!status) return;
+
+        console.log(`[poll] ${tempTxId}:`, status.status);
+
         if (status.status === 'Accepted' && status.transactionId) {
           clearInterval(interval);
           resolve(status.transactionId);
@@ -151,7 +163,6 @@ export function pollTransaction(tempTxId: string, transactionStatus: any): Promi
           reject(new Error(`Transaction ${status.status ?? 'failed'}`));
         }
       } catch (err) {
-        console.error(`Error polling transaction ${tempTxId}:`, err);
         clearInterval(interval);
         reject(err);
       }
@@ -176,7 +187,7 @@ export async function fetchMappingValue(
   }
 }
 
-// ── Pool stats (keys are now 0u8, not TOKEN_ID field) ─────────
+// ── Pool stats ────────────────────────────────────────────────
 export async function fetchPoolStats() {
   try {
     const [liquidity, borrowed, interestEarned, loanCount] = await Promise.all([
@@ -214,27 +225,16 @@ export async function fetchPoolStats() {
 
 // ── Leo record string builders ────────────────────────────────
 
-/**
- * credits.aleo native credits record.
- * Used as input to deposit / request_loan / repay_loan / withdraw.
- */
-export function buildCreditsRecord(
-  owner:         string,
-  microcredits:  number
-): string {
+export function buildCreditsRecord(owner: string, microcredits: number): string {
   return `{owner: ${owner}, microcredits: ${microcredits}u64}`;
 }
 
-/**
- * CreditRecord — private, owner-only visible.
- * total_volume is u64 (microcredits) now.
- */
 export function buildCreditRecord(
   owner:          string,
   walletAgeDays:  number,
   repaymentsMade: number,
   defaults:       number,
-  totalVolume:    number,  // microcredits u64
+  totalVolume:    number,
   currentScore:   number,
   lastUpdated:    number,
   nonce:          string
@@ -244,16 +244,13 @@ export function buildCreditRecord(
     `wallet_age_days: ${walletAgeDays}u32`,
     `repayments_made: ${repaymentsMade}u32`,
     `defaults: ${defaults}u32`,
-    `total_volume: ${totalVolume}u64`,   // u64 — matches credits.aleo
+    `total_volume: ${totalVolume}u64`,
     `current_score: ${currentScore}u32`,
     `last_updated: ${lastUpdated}u32`,
     `nonce: ${nonce}}`,
   ].join(', ');
 }
 
-/**
- * CreditTierProof — reveals only tier, not raw data.
- */
 export function buildTierProof(
   owner:     string,
   tier:      number,
@@ -264,15 +261,11 @@ export function buildTierProof(
   return `{owner: ${owner}, tier: ${tier}u8, org_id: ${orgId}, expires_at: ${expiresAt}u32, nonce: ${nonce}}`;
 }
 
-/**
- * LoanRecord — private, held by borrower.
- * No token_id field. principal / interest_rate are u64.
- */
 export function buildLoanRecord(
   owner:         string,
   loanId:        string,
-  principal:     number,   // microcredits u64
-  interestRate:  number,   // bps u64
+  principal:     number,
+  interestRate:  number,
   borrowedBlock: number,
   dueBlock:      number,
   tier:          number,
@@ -281,7 +274,7 @@ export function buildLoanRecord(
   return [
     `{owner: ${owner}`,
     `loan_id: ${loanId}`,
-    `principal: ${principal}u64`,        // u64, no token_id
+    `principal: ${principal}u64`,
     `interest_rate: ${interestRate}u64`,
     `borrowed_block: ${borrowedBlock}u32`,
     `due_block: ${dueBlock}u32`,
@@ -290,35 +283,27 @@ export function buildLoanRecord(
   ].join(', ');
 }
 
-/**
- * LenderDeposit receipt — private, held by lender.
- * No token_id field. deposited_amount is u64.
- */
 export function buildLenderDeposit(
   owner:        string,
-  amount:       number,   // microcredits u64
+  amount:       number,
   depositBlock: number,
   nonce:        string
 ): string {
   return [
     `{owner: ${owner}`,
-    `deposited_amount: ${amount}u64`,    // u64, no token_id
+    `deposited_amount: ${amount}u64`,
     `deposit_block: ${depositBlock}u32`,
     `nonce: ${nonce}}`,
   ].join(', ');
 }
 
-/**
- * OracleAttestation — private, sent to user by oracle.
- * total_volume is u64 (microcredits).
- */
 export function buildOracleAttestation(
   owner:          string,
   attester:       string,
   walletAgeDays:  number,
   repaymentsMade: number,
   defaults:       number,
-  totalVolume:    number,  // microcredits u64
+  totalVolume:    number,
   validUntil:     number,
   attestationId:  string
 ): string {
@@ -328,7 +313,7 @@ export function buildOracleAttestation(
     `wallet_age_days: ${walletAgeDays}u32`,
     `repayments_made: ${repaymentsMade}u32`,
     `defaults: ${defaults}u32`,
-    `total_volume: ${totalVolume}u64`,   // u64
+    `total_volume: ${totalVolume}u64`,
     `valid_until: ${validUntil}u32`,
     `attestation_id: ${attestationId}}`,
   ].join(', ');

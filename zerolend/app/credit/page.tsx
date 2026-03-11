@@ -11,7 +11,6 @@ import {
   computeCreditScore, scoreToTier, getTierInfo,
   randomField, executeTransaction, PROGRAM_ID,
   buildOracleAttestation, aleoToMicro, microToAleo,
-  getWalletBalance,
   getCurrentBlockHeight
 } from '../../lib/aleo';
 import {
@@ -20,6 +19,7 @@ import {
 } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
+// ── Wallet age helper ─────────────────────────────────────────
 const PROVABLE_API = 'https://api.provable.com/v2';
 
 async function fetchWalletAgeDays(address: string): Promise<number> {
@@ -38,22 +38,17 @@ async function fetchWalletAgeDays(address: string): Promise<number> {
       const txs: any[] = data?.transactions ?? [];
       if (txs.length === 0) break;
 
-      // Last item on each page is the oldest on that page
       const lastTx = txs[txs.length - 1];
       const ts = parseInt(lastTx?.block_timestamp ?? '0');
       if (ts > 0) oldestTimestamp = ts;
 
-      // next_cursor moves toward older transactions
       const nextCursor = data?.next_cursor;
       if (!nextCursor?.transition_id) break;
       cursor = nextCursor.transition_id;
     }
 
     if (!oldestTimestamp) return 0;
-
-    // block_timestamp is Unix seconds
     const ageMs = Date.now() - oldestTimestamp * 1000;
-    console.log(ageMs,'some')
     return Math.max(0, Math.floor(ageMs / (1000 * 60 * 60 * 24)));
   } catch {
     return 0;
@@ -61,7 +56,7 @@ async function fetchWalletAgeDays(address: string): Promise<number> {
 }
 
 export default function CreditPage() {
-  const { transactionStatus,connected,address,executeTransaction:executeHandler } = useWallet();
+  const { transactionStatus, connected, address, executeTransaction: executeHandler } = useWallet();
   const {
     wallet, creditScore, creditTier, creditRecord,
     setCreditRecord, setTierProof
@@ -71,17 +66,16 @@ export default function CreditPage() {
     walletAgeDays:  '',
     repaymentsMade: '',
     defaults:       '',
-    totalVolume:    '', 
+    totalVolume:    '',
   });
 
   const [prefilling, setPrefilling]       = useState(false);
   const [prefillDone, setPrefillDone]     = useState(false);
   const [prefillSource, setPrefillSource] = useState<Record<string, 'chain' | 'supabase' | 'new'>>({});
-
-  const [step, setStep]               = useState<'idle' | 'attesting' | 'redeeming' | 'proving' | 'done'>('idle');
-  const [showRawData, setShowRawData] = useState(false);
-  const [attestation, setAttestation] = useState<any>(null);
-  const [proofExpiry, setProofExpiry] = useState('200');
+  const [step, setStep]                   = useState<'idle' | 'attesting' | 'redeeming' | 'proving' | 'done'>('idle');
+  const [showRawData, setShowRawData]     = useState(false);
+  const [attestation, setAttestation]     = useState<any>(null);
+  const [proofExpiry, setProofExpiry]     = useState('200');
 
   // ── Auto-prefill when wallet connects ────────────────────────
   useEffect(() => {
@@ -89,20 +83,19 @@ export default function CreditPage() {
     prefillForm(address);
   }, [connected, address]);
 
-  async function prefillForm(address: string) {
+  async function prefillForm(addr: string) {
     setPrefilling(true);
     try {
-      // Wallet age — from Aleo chain explorer
-      const ageDays = await fetchWalletAgeDays(address);
-
-      // Loan history — from Supabase 
-      const history = await getUserLoanHistory(address);
+      const [ageDays, history] = await Promise.all([
+        fetchWalletAgeDays(addr),
+        getUserLoanHistory(addr),
+      ]);
 
       const sources: Record<string, 'chain' | 'supabase' | 'new'> = {
-        walletAgeDays:  ageDays > 0         ? 'chain'    : 'new',
-        repaymentsMade: history.repaidCount > 0     ? 'supabase' : 'new',
-        defaults:       history.liquidatedCount > 0  ? 'supabase' : 'new',
-        totalVolume:    history.totalRepaidVolumeMicro > 0 ? 'supabase' : 'new',
+        walletAgeDays:  ageDays > 0                          ? 'chain'    : 'new',
+        repaymentsMade: history.repaidCount > 0              ? 'supabase' : 'new',
+        defaults:       history.liquidatedCount > 0          ? 'supabase' : 'new',
+        totalVolume:    history.totalRepaidVolumeMicro > 0   ? 'supabase' : 'new',
       };
 
       setForm({
@@ -121,8 +114,7 @@ export default function CreditPage() {
       } else {
         toast.success('Credit history loaded from chain + ZeroLend records.');
       }
-    } catch (e) {
-      // Silently fall back to empty form — don't block the user
+    } catch {
       setForm({ walletAgeDays: '0', repaymentsMade: '0', defaults: '0', totalVolume: '0' });
       setPrefillDone(true);
     } finally {
@@ -144,6 +136,8 @@ export default function CreditPage() {
   const tierInfo    = creditTier ? getTierInfo(creditTier) : null;
 
   // ── Step 1: Oracle Attestation ────────────────────────────────
+  // Calls /api/attest — oracle private key never touches the browser.
+  // Any wallet (including judges') can trigger this.
   async function handleAttest() {
     if (!connected || !address) {
       toast.error('Connect your wallet first');
@@ -151,19 +145,48 @@ export default function CreditPage() {
     }
     setStep('attesting');
     try {
-      const attId      = randomField();
-      const currentBlk = await getCurrentBlockHeight();
-      const age        = parseInt(form.walletAgeDays)  || 0;
-      const reps       = parseInt(form.repaymentsMade) || 0;
-      const defs       = parseInt(form.defaults)       || 0;
-      const vol        = aleoToMicro(parseFloat(form.totalVolume) || 0);
-console.log(currentBlk)
+      const age  = parseInt(form.walletAgeDays)  || 0;
+      const reps = parseInt(form.repaymentsMade) || 0;
+      const defs = parseInt(form.defaults)       || 0;
+      const vol  = aleoToMicro(parseFloat(form.totalVolume) || 0);
+
+      const currentBlock = await getCurrentBlockHeight();
+      if (!currentBlock) {
+        toast.error('Could not fetch block height — try again.');
+        setStep('idle');
+        return;
+      }
+
+      // POST to oracle API route — server holds oracle key, user just sends data
+      const res = await fetch('/api/attest', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient:        address,
+          walletAgeDays:    age,
+          repaymentsMade:   reps,
+          defaults:         defs,
+          totalVolumeMicro: vol,
+          currentBlock,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? `API error ${res.status}`);
+      }
+
+      const data = await res.json();
+      // data: { txId, attestationId, validUntil, recipient,
+      //         walletAgeDays, repaymentsMade, defaults, totalVolumeMicro }
+
       const computedScore = computeCreditScore(age, reps, defs, vol);
       const tier          = scoreToTier(computedScore);
 
+      // Track in Supabase for history pre-fill on next visit
       await insertAttestation({
         user_address:    address,
-        attestation_id:  attId,
+        attestation_id:  data.attestationId,
         wallet_age_days: age,
         repayments_made: reps,
         defaults:        defs,
@@ -172,22 +195,15 @@ console.log(currentBlk)
         tier,
       });
 
-      await executeTransaction({
-        programId:    PROGRAM_ID,
-        functionName: 'attest_credit',
-        inputs: [
-          address,
-          `${age}u32`,
-          `${reps}u32`,
-          `${defs}u32`,
-          `${vol}u64`,
-          '500u32',
-          `${currentBlk}u32`,
-          attId,
-        ],
-      }, executeHandler,transactionStatus);
+      setAttestation({
+        attId:        data.attestationId,
+        validUntil:   data.validUntil,
+        currentBlock,
+        age, reps, defs, vol,
+        tier, computedScore,
+        txId: data.txId,
+      });
 
-      setAttestation({ attId, age, reps, defs, vol, tier, computedScore });
       toast.success('Credit data attested on-chain!');
       setStep('redeeming');
     } catch (e: any) {
@@ -197,26 +213,32 @@ console.log(currentBlk)
   }
 
   // ── Step 2: Redeem Attestation → CreditRecord ─────────────────
+  // User's own wallet signs this — only the recipient can redeem.
   async function handleRedeem() {
-    if (!attestation) return;
+    if (!attestation || !address) return;
     setStep('redeeming');
     try {
-      const nonce = randomField();
-      const att   = attestation;
+      const nonce      = randomField();
+      const att        = attestation;
       const currentBlk = await getCurrentBlockHeight();
 
+      // Build the OracleAttestation record string using values returned by the API
       const attRecord = buildOracleAttestation(
-        address!,
-        address!,
-        att.age, att.reps, att.defs, att.vol,
-        600, att.attId
+        address,          // owner = recipient (the user)
+        address,          // attester shown as user address on frontend (oracle is server-side)
+        att.age,
+        att.reps,
+        att.defs,
+        att.vol,
+        att.validUntil,   // real valid_until from API — not hardcoded
+        att.attId
       );
 
       await executeTransaction({
         programId:    PROGRAM_ID,
         functionName: 'redeem_attestation',
-        inputs: [attRecord, `${currentBlk}u32`, nonce],
-      }, executeHandler,transactionStatus);
+        inputs:       [attRecord, `${currentBlk}u32`, nonce],
+      }, executeHandler, transactionStatus);
 
       await markAttestationRedeemed(att.attId);
 
@@ -245,17 +267,36 @@ console.log(currentBlk)
     if (!creditRecord || !address) return;
     setStep('proving');
     try {
-      const pNonce = randomField();
-      const expiry = parseInt(proofExpiry) || 200;
-      const rec    = `{owner: ${creditRecord.owner}, wallet_age_days: ${creditRecord.wallet_age_days}, repayments_made: ${creditRecord.repayments_made}, defaults: ${creditRecord.defaults}, total_volume: ${creditRecord.total_volume}, current_score: ${creditRecord.current_score}, last_updated: ${creditRecord.last_updated}, nonce: ${creditRecord.nonce}}`;
-      const currentblk = await getCurrentBlockHeight();
+      const pNonce       = randomField();
+      const expiry       = parseInt(proofExpiry) || 200;
+      const currentBlock = await getCurrentBlockHeight();
+
+      const rec = [
+        `{owner: ${creditRecord.owner}`,
+        `wallet_age_days: ${creditRecord.wallet_age_days}`,
+        `repayments_made: ${creditRecord.repayments_made}`,
+        `defaults: ${creditRecord.defaults}`,
+        `total_volume: ${creditRecord.total_volume}`,
+        `current_score: ${creditRecord.current_score}`,
+        `last_updated: ${creditRecord.last_updated}`,
+        `nonce: ${creditRecord.nonce}}`,
+      ].join(', ');
+
       await executeTransaction({
         programId:    PROGRAM_ID,
         functionName: 'prove_tier',
-        inputs:       [rec, pNonce, `${expiry}u32`, `${currentblk}u32`, '1field'],
-      }, executeHandler,transactionStatus);
+        inputs:       [rec, pNonce, `${expiry}u32`, `${currentBlock}u32`, '1field'],
+      }, executeHandler, transactionStatus);
 
-      const proofStr = `{owner: ${address}, tier: ${creditTier}u8, org_id: 1field, expires_at: ${100 + expiry}u32, nonce: ${pNonce}}`;
+      // Store tier proof string in Zustand for borrow page
+      const proofStr = [
+        `{owner: ${address}`,
+        `tier: ${creditTier}u8`,
+        `org_id: 1field`,
+        `expires_at: ${currentBlock + expiry}u32`,
+        `nonce: ${pNonce}}`,
+      ].join(', ');
+
       setTierProof(proofStr);
       toast.success('Tier proof generated! Ready to borrow.');
       setStep('done');
@@ -265,14 +306,14 @@ console.log(currentBlk)
     }
   }
 
-  // ── Source badge helper ───────────────────────────────────────
+  // ── Source badge ──────────────────────────────────────────────
   function SourceBadge({ field }: { field: string }) {
     const src = prefillSource[field];
     if (!src) return null;
     const config = {
-      chain:    { label: 'from chain',    color: '#00d4ff' },
-      supabase: { label: 'from history',  color: '#00ffcc' },
-      new:      { label: 'new wallet',    color: '#6b7fa3' },
+      chain:    { label: 'from chain',   color: '#00d4ff' },
+      supabase: { label: 'from history', color: '#00ffcc' },
+      new:      { label: 'new wallet',   color: '#6b7fa3' },
     }[src];
     return (
       <span className="text-[10px] px-1.5 py-0.5 rounded-md font-mono"
@@ -364,7 +405,7 @@ console.log(currentBlk)
       {/* Step flow */}
       <div className="grid md:grid-cols-2 gap-6">
 
-        {/* Step 1: Oracle Attestation */}
+        {/* Step 1 */}
         <div className="glass rounded-2xl p-6"
           style={creditScore !== null ? { opacity: 0.5, pointerEvents: 'none' } : {}}>
 
@@ -379,34 +420,28 @@ console.log(currentBlk)
               </h3>
               <p className="text-xs text-zero-text-dim">Submit credit data for ZK attestation</p>
             </div>
-            {/* Prefill status */}
             {prefilling && (
               <div className="flex items-center gap-1.5 text-xs text-zero-text-dim">
-                <Loader2 size={12} className="animate-spin" />
-                Loading…
+                <Loader2 size={12} className="animate-spin" />Loading…
               </div>
             )}
             {prefillDone && !prefilling && (
               <div className="flex items-center gap-1.5 text-xs text-zero-teal">
-                <CheckCircle size={12} />
-                Auto-filled
+                <CheckCircle size={12} />Auto-filled
               </div>
             )}
           </div>
 
-          {/* Prefill info banner */}
           {prefillDone && !prefilling && (
             <div className="mb-4 p-3 rounded-xl flex items-start gap-2 text-xs"
               style={{ background: 'rgba(0,212,255,0.05)', border: '1px solid rgba(0,212,255,0.12)' }}>
               <Info size={12} className="text-zero-cyan mt-0.5 flex-shrink-0" />
               <span className="text-zero-text-dim leading-relaxed">
-                Fields pre-filled from your on-chain wallet age and ZeroLend repayment history.
-                You can edit any value before attesting.
+                Pre-filled from your on-chain wallet age and ZeroLend history. You can edit before attesting.
               </span>
             </div>
           )}
 
-          {/* Not connected state */}
           {!connected && (
             <div className="mb-4 p-3 rounded-xl text-xs text-center text-zero-text-dim"
               style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid #1a2540' }}>
@@ -416,11 +451,11 @@ console.log(currentBlk)
 
           <div className="space-y-3">
             {[
-              { key: 'walletAgeDays',  label: 'Wallet Age (days)',  placeholder: '0', hint: 'Age of your Aleo wallet'           },
-              { key: 'repaymentsMade', label: 'Repayments Made',    placeholder: '0', hint: 'Loans repaid on ZeroLend'          },
-              { key: 'defaults',       label: 'Defaults / Missed',  placeholder: '0', hint: 'Loans liquidated on ZeroLend'      },
-              { key: 'totalVolume',    label: 'Total Volume (ALEO)', placeholder: '0', hint: 'Total ALEO borrowed and repaid'   },
-            ].map(({ key, label, placeholder, hint }) => (
+              { key: 'walletAgeDays',  label: 'Wallet Age (days)',   hint: 'Age of your Aleo wallet'        },
+              { key: 'repaymentsMade', label: 'Repayments Made',     hint: 'Loans repaid on ZeroLend'       },
+              { key: 'defaults',       label: 'Defaults / Missed',   hint: 'Loans liquidated on ZeroLend'   },
+              { key: 'totalVolume',    label: 'Total Volume (ALEO)', hint: 'Total ALEO borrowed and repaid' },
+            ].map(({ key, label, hint }) => (
               <div key={key}>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs text-zero-text-dim">{label}</label>
@@ -428,19 +463,15 @@ console.log(currentBlk)
                 </div>
                 <div className="relative">
                   <input
-                    className={`zero-input ${key === 'totalVolume' ? 'pr-14' : ''} ${
-                      prefilling ? 'opacity-50' : ''
-                    }`}
+                    className={`zero-input ${key === 'totalVolume' ? 'pr-14' : ''} ${prefilling ? 'opacity-50' : ''}`}
                     type="number"
-                    placeholder={prefilling ? 'Loading…' : placeholder}
+                    placeholder={prefilling ? 'Loading…' : '0'}
                     disabled={prefilling}
                     value={form[key as keyof typeof form]}
-                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                    onChange={(e) => setForm(f => ({ ...f, [key]: e.target.value }))}
                   />
                   {key === 'totalVolume' && (
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zero-text-dim text-xs">
-                      ALEO
-                    </span>
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zero-text-dim text-xs">ALEO</span>
                   )}
                 </div>
                 <p className="text-[10px] text-zero-muted mt-0.5">{hint}</p>
@@ -448,7 +479,6 @@ console.log(currentBlk)
             ))}
           </div>
 
-          {/* Score preview */}
           {score !== null && previewTier && (
             <div className="mt-4 p-3 rounded-xl flex items-center justify-between" style={{
               background: `${getTierInfo(previewTier).color}10`,
@@ -460,13 +490,9 @@ console.log(currentBlk)
                   {score}
                 </span>
                 <span className="tag" style={{
-                  background:  `${getTierInfo(previewTier).color}18`,
-                  borderColor: `${getTierInfo(previewTier).color}40`,
-                  color:       getTierInfo(previewTier).color,
-                  fontSize:    10,
-                }}>
-                  T{previewTier}
-                </span>
+                  background: `${getTierInfo(previewTier).color}18`, borderColor: `${getTierInfo(previewTier).color}40`,
+                  color: getTierInfo(previewTier).color, fontSize: 10,
+                }}>T{previewTier}</span>
               </div>
             </div>
           )}
@@ -489,19 +515,17 @@ console.log(currentBlk)
         {/* Steps 2 & 3 */}
         <div className="space-y-4">
 
-          {/* Step 2: Redeem */}
+          {/* Step 2 */}
           <div className="glass rounded-2xl p-5"
             style={step !== 'redeeming' && creditScore === null ? { opacity: 0.4, pointerEvents: 'none' } : {}}>
             <div className="flex items-center gap-3 mb-4">
               <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
                 style={{
-                  background:  step === 'redeeming' ? 'rgba(0,212,255,0.15)' : 'rgba(255,255,255,0.05)',
-                  border:      `1px solid ${step === 'redeeming' ? 'rgba(0,212,255,0.3)' : '#1a2540'}`,
-                  fontFamily:  "'Syne', sans-serif",
-                  color:       step === 'redeeming' ? '#00d4ff' : '#4a5878',
-                }}>
-                2
-              </div>
+                  background: step === 'redeeming' ? 'rgba(0,212,255,0.15)' : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${step === 'redeeming' ? 'rgba(0,212,255,0.3)' : '#1a2540'}`,
+                  fontFamily: "'Syne', sans-serif",
+                  color: step === 'redeeming' ? '#00d4ff' : '#4a5878',
+                }}>2</div>
               <div>
                 <h3 className="text-sm font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
                   Mint Credit Record
@@ -528,19 +552,17 @@ console.log(currentBlk)
             </button>
           </div>
 
-          {/* Step 3: Prove tier */}
+          {/* Step 3 */}
           <div className="glass rounded-2xl p-5"
             style={creditScore === null ? { opacity: 0.4, pointerEvents: 'none' } : {}}>
             <div className="flex items-center gap-3 mb-4">
               <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
                 style={{
-                  background:  creditScore !== null ? 'rgba(124,58,237,0.2)' : 'rgba(255,255,255,0.05)',
-                  border:      `1px solid ${creditScore !== null ? 'rgba(124,58,237,0.4)' : '#1a2540'}`,
-                  fontFamily:  "'Syne', sans-serif",
-                  color:       creditScore !== null ? '#a855f7' : '#4a5878',
-                }}>
-                3
-              </div>
+                  background: creditScore !== null ? 'rgba(124,58,237,0.2)' : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${creditScore !== null ? 'rgba(124,58,237,0.4)' : '#1a2540'}`,
+                  fontFamily: "'Syne', sans-serif",
+                  color: creditScore !== null ? '#a855f7' : '#4a5878',
+                }}>3</div>
               <div>
                 <h3 className="text-sm font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
                   Generate Tier Proof
@@ -589,18 +611,18 @@ console.log(currentBlk)
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-zero-border/30">
-                {['Tier', 'Label', 'Score Range', 'Max Loan', 'APR', 'Term'].map((h) => (
+                {['Tier', 'Label', 'Score Range', 'Max Loan', 'APR', 'Term'].map(h => (
                   <th key={h} className="px-6 py-3 text-left text-xs text-zero-text-dim font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {[
-                { tier: 1, label: 'Poor',      range: '0–299',    max: '10 ALEO',    rate: '20%', term: '2 days'  },
-                { tier: 2, label: 'Fair',       range: '300–499',  max: '50 ALEO',    rate: '15%', term: '5 days'  },
-                { tier: 3, label: 'Good',       range: '500–699',  max: '200 ALEO',   rate: '10%', term: '10 days' },
-                { tier: 4, label: 'Great',      range: '700–849',  max: '1,000 ALEO', rate: '7%',  term: '20 days' },
-                { tier: 5, label: 'Excellent',  range: '850–1000', max: '5,000 ALEO', rate: '4%',  term: '30 days' },
+                { tier: 1, label: 'Poor',     range: '0–299',    max: '10 ALEO',    rate: '20%', term: '2 days'  },
+                { tier: 2, label: 'Fair',      range: '300–499',  max: '50 ALEO',    rate: '15%', term: '5 days'  },
+                { tier: 3, label: 'Good',      range: '500–699',  max: '200 ALEO',   rate: '10%', term: '10 days' },
+                { tier: 4, label: 'Great',     range: '700–849',  max: '1,000 ALEO', rate: '7%',  term: '20 days' },
+                { tier: 5, label: 'Excellent', range: '850–1000', max: '5,000 ALEO', rate: '4%',  term: '30 days' },
               ].map(({ tier, label, range, max, rate, term }) => (
                 <tr key={tier}
                   className="border-b border-zero-border/20 hover:bg-white/[0.02] transition-colors"

@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@provablehq/sdk": "^0.9.17"
+  },
+  "scripts": {
+  "oracle": "ts-node oracle/server.ts",
+  "dev:all": "concurrently \"npm run dev\" \"npm run oracle\""
+}
+}

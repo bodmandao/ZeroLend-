@@ -165,7 +165,7 @@ const server = createServer(async (req, res) => {
           programName:     PROGRAM_ID,
           functionName:    'attest_credit',
           inputs,
-          priorityFee:     0.3,
+          fee:0.3,
           privateFee:      false,
           keySearchParams,
         });
