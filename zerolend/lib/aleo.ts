@@ -91,6 +91,18 @@ export async function getWalletBalance(address: string): Promise<number> {
   }
 }
 
+// Fetch current block height from the Aleo network
+export async function getCurrentBlockHeight(): Promise<number> {
+  try {
+    const res = await fetch(`${API_URL}/testnet/block/height/latest`);
+    if (!res.ok) return 0;
+    const data = await res.json();
+    // Returns a plain number e.g. 14976140
+    return typeof data === 'number' ? data : parseInt(data) || 0;
+  } catch {
+    return 0;
+  }
+}
 
 export async function executeTransaction(
   params:  any,
@@ -111,6 +123,7 @@ console.log(params)
     privateFee,
   });
 
+  console.log('Raw transaction response:', raw);
   const tempTxId: string = typeof raw === 'string' ? raw : raw?.transactionId;
   if (!tempTxId) throw new Error('No transaction ID returned from wallet');
 
@@ -129,7 +142,7 @@ export function pollTransaction(tempTxId: string, transactionStatus: any): Promi
       try {
         const status = await transactionStatus?.(tempTxId);
         if (!status) return; // still pending, keep polling
-
+        console.log(`Transaction ${tempTxId} status: ${status.status}`);
         if (status.status === 'Accepted' && status.transactionId) {
           clearInterval(interval);
           resolve(status.transactionId);
@@ -138,6 +151,7 @@ export function pollTransaction(tempTxId: string, transactionStatus: any): Promi
           reject(new Error(`Transaction ${status.status ?? 'failed'}`));
         }
       } catch (err) {
+        console.error(`Error polling transaction ${tempTxId}:`, err);
         clearInterval(interval);
         reject(err);
       }

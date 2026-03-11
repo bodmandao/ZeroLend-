@@ -11,7 +11,8 @@ import {
   computeCreditScore, scoreToTier, getTierInfo,
   randomField, executeTransaction, PROGRAM_ID,
   buildOracleAttestation, aleoToMicro, microToAleo,
-  getWalletBalance
+  getWalletBalance,
+  getCurrentBlockHeight
 } from '../../lib/aleo';
 import {
   insertAttestation, markAttestationRedeemed,
@@ -151,12 +152,12 @@ export default function CreditPage() {
     setStep('attesting');
     try {
       const attId      = randomField();
-      const currentBlk = 100;
+      const currentBlk = await getCurrentBlockHeight();
       const age        = parseInt(form.walletAgeDays)  || 0;
       const reps       = parseInt(form.repaymentsMade) || 0;
       const defs       = parseInt(form.defaults)       || 0;
       const vol        = aleoToMicro(parseFloat(form.totalVolume) || 0);
-
+console.log(currentBlk)
       const computedScore = computeCreditScore(age, reps, defs, vol);
       const tier          = scoreToTier(computedScore);
 
@@ -202,6 +203,7 @@ export default function CreditPage() {
     try {
       const nonce = randomField();
       const att   = attestation;
+      const currentBlk = await getCurrentBlockHeight();
 
       const attRecord = buildOracleAttestation(
         address!,
@@ -213,8 +215,8 @@ export default function CreditPage() {
       await executeTransaction({
         programId:    PROGRAM_ID,
         functionName: 'redeem_attestation',
-        inputs: [attRecord, '100u32', nonce],
-      }, executeHandler);
+        inputs: [attRecord, `${currentBlk}u32`, nonce],
+      }, executeHandler,transactionStatus);
 
       await markAttestationRedeemed(att.attId);
 
@@ -225,7 +227,7 @@ export default function CreditPage() {
         defaults:        `${att.defs}u32`,
         total_volume:    `${att.vol}u64`,
         current_score:   `${att.computedScore}u32`,
-        last_updated:    '100u32',
+        last_updated:    `${currentBlk}u32`,
         nonce,
       };
 
@@ -246,12 +248,12 @@ export default function CreditPage() {
       const pNonce = randomField();
       const expiry = parseInt(proofExpiry) || 200;
       const rec    = `{owner: ${creditRecord.owner}, wallet_age_days: ${creditRecord.wallet_age_days}, repayments_made: ${creditRecord.repayments_made}, defaults: ${creditRecord.defaults}, total_volume: ${creditRecord.total_volume}, current_score: ${creditRecord.current_score}, last_updated: ${creditRecord.last_updated}, nonce: ${creditRecord.nonce}}`;
-
+      const currentblk = await getCurrentBlockHeight();
       await executeTransaction({
         programId:    PROGRAM_ID,
         functionName: 'prove_tier',
-        inputs:       [rec, pNonce, `${expiry}u32`, '100u32', '1field'],
-      }, executeHandler);
+        inputs:       [rec, pNonce, `${expiry}u32`, `${currentblk}u32`, '1field'],
+      }, executeHandler,transactionStatus);
 
       const proofStr = `{owner: ${address}, tier: ${creditTier}u8, org_id: 1field, expires_at: ${100 + expiry}u32, nonce: ${pNonce}}`;
       setTierProof(proofStr);
