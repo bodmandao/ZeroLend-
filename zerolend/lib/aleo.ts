@@ -1,6 +1,6 @@
-export const PROGRAM_ID   = 'lending_pool.aleo';
+export const PROGRAM_ID   = 'zerolend_lending_pool_v1.aleo';
 export const NETWORK      = 'testnet';
-export const API_URL      = 'https://api.explorer.provable.com/v1';
+export const API_URL      = 'https://api.explorer.provable.com/v2';
 export const ORG_ID       = '1field';
 
 // ── Tier definitions  ──────────────
@@ -12,7 +12,7 @@ export const TIERS = {
   5: { label: 'Excellent', color: '#00d4ff', maxLoan: 5000,  rate: 4,  minScore: 850 },
 };
 
-// ── Score calculation  ─────────────
+// ── Score calculation (mirrors Leo logic exactly) ─────────────
 export function computeCreditScore(
   walletAgeDays:  number,
   repaymentsMade: number,
@@ -91,35 +91,58 @@ export async function getWalletBalance(address: string): Promise<number> {
   }
 }
 
-// ── Transaction execution ────────────────
-export interface ExecuteParams {
-  programId:    string;
-  functionName: string;
-  inputs:       string[];
-  fee?:         number;
-}
 
 export async function executeTransaction(
-  params: ExecuteParams,
-  wallet: any  // injected from useWallet() hook
+  params:  any,
+  executeHandler:  any,
+  transactionStatus : any
 ): Promise<string> {
-  if (!wallet) throw new Error('Wallet not connected');
+  
+  if (!executeHandler) throw new Error('Wallet not connected');
 
-  const { programId, functionName, inputs, fee = 1_000_000 } = params;
-
-  const txId = await wallet.requestTransaction({
-    address:     wallet.publicKey,
-    chainId:     'aleo:1',
-    transitions: [{
-      program:  programId,
-      function: functionName,
-      inputs,
-    }],
+  const { programId, functionName: fn, inputs, fee = 200000, privateFee = false } = params;
+console.log(params)
+  // 1. Submit — returns a temp/pending tx id
+  const raw = await executeHandler({
+    program : programId,
+    function: fn,
+    inputs,
     fee,
-    feePrivate: false,
+    privateFee,
   });
 
-  return txId;
+  const tempTxId: string = typeof raw === 'string' ? raw : raw?.transactionId;
+  if (!tempTxId) throw new Error('No transaction ID returned from wallet');
+
+  // 2. Poll until Accepted (or throw on failure)
+  const finalTxId = await pollTransaction(tempTxId, transactionStatus);
+  return finalTxId;
+}
+
+/**
+ * Poll a pending transaction every 2s until status === 'Accepted'.
+ * Rejects on any non-pending / non-accepted status.
+ */
+export function pollTransaction(tempTxId: string, transactionStatus: any): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const interval = setInterval(async () => {
+      try {
+        const status = await transactionStatus?.(tempTxId);
+        if (!status) return; // still pending, keep polling
+
+        if (status.status === 'Accepted' && status.transactionId) {
+          clearInterval(interval);
+          resolve(status.transactionId);
+        } else if (status.status !== 'pending') {
+          clearInterval(interval);
+          reject(new Error(`Transaction ${status.status ?? 'failed'}`));
+        }
+      } catch (err) {
+        clearInterval(interval);
+        reject(err);
+      }
+    }, 2000);
+  });
 }
 
 // ── Mapping fetcher ───────────────────────────────────────────

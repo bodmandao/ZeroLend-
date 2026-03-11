@@ -60,7 +60,7 @@ async function fetchWalletAgeDays(address: string): Promise<number> {
 }
 
 export default function CreditPage() {
-  const { wallet: walletAdapter,connected,address } = useWallet();
+  const { transactionStatus,connected,address,executeTransaction:executeHandler } = useWallet();
   const {
     wallet, creditScore, creditTier, creditRecord,
     setCreditRecord, setTierProof
@@ -184,7 +184,7 @@ export default function CreditPage() {
           `${currentBlk}u32`,
           attId,
         ],
-      }, walletAdapter);
+      }, executeHandler,transactionStatus);
 
       setAttestation({ attId, age, reps, defs, vol, tier, computedScore });
       toast.success('Credit data attested on-chain!');
@@ -214,7 +214,7 @@ export default function CreditPage() {
         programId:    PROGRAM_ID,
         functionName: 'redeem_attestation',
         inputs: [attRecord, '100u32', nonce],
-      }, walletAdapter);
+      }, executeHandler);
 
       await markAttestationRedeemed(att.attId);
 
@@ -251,7 +251,7 @@ export default function CreditPage() {
         programId:    PROGRAM_ID,
         functionName: 'prove_tier',
         inputs:       [rec, pNonce, `${expiry}u32`, '100u32', '1field'],
-      }, walletAdapter);
+      }, executeHandler);
 
       const proofStr = `{owner: ${address}, tier: ${creditTier}u8, org_id: 1field, expires_at: ${100 + expiry}u32, nonce: ${pNonce}}`;
       setTierProof(proofStr);
