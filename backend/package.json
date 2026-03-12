@@ -1,9 +1,16 @@
 {
   "dependencies": {
-    "@provablehq/sdk": "^0.9.17"
+    "@provablehq/sdk": "^0.9.17",
+    "cors": "^2.8.6",
+    "crypto": "^1.0.1",
+    "express": "^5.2.1"
   },
   "scripts": {
-  "oracle": "ts-node oracle/server.ts",
-  "dev:all": "concurrently \"npm run dev\" \"npm run oracle\""
-}
+    "oracle": "ts-node oracle/server.ts",
+    "dev:all": "concurrently \"npm run dev\" \"npm run oracle\""
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6"
+  }
 }
