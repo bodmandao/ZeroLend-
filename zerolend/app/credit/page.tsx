@@ -136,8 +136,8 @@ export default function CreditPage() {
   const tierInfo    = creditTier ? getTierInfo(creditTier) : null;
 
   // ── Step 1: Oracle Attestation ────────────────────────────────
-  // Calls /api/attest — oracle private key never touches the browser.
-  // Any wallet (including judges') can trigger this.
+  // Fire-and-forget: POST returns jobId instantly, we poll for result.
+  // This avoids 504 timeouts since ZK proving takes 30-120s.
   async function handleAttest() {
     if (!connected || !address) {
       toast.error('Connect your wallet first');
@@ -157,8 +157,8 @@ export default function CreditPage() {
         return;
       }
 
-      // POST to oracle API route — server holds oracle key, user just sends data
-      const res = await fetch('/api/attest', {
+      // Step 1a: POST to start the job — returns { jobId } immediately
+      const startRes = await fetch('/api/attest', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -171,19 +171,23 @@ export default function CreditPage() {
         }),
       });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error ?? `API error ${res.status}`);
+      if (!startRes.ok) {
+        const err = await startRes.json().catch(() => ({}));
+        throw new Error(err.error ?? `API error ${startRes.status}`);
       }
 
-      const data = await res.json();
-      // data: { txId, attestationId, validUntil, recipient,
-      //         walletAgeDays, repaymentsMade, defaults, totalVolumeMicro }
+      const { jobId } = await startRes.json();
+      if (!jobId) throw new Error('No job ID returned from oracle');
+
+      toast('Generating ZK proof — this takes ~60s…', { icon: '⚙️', duration: 90_000, id: 'zk-progress' });
+
+      // Step 1b: Poll GET /api/attest?jobId=xxx until done or error
+      const data = await pollAttestJob(jobId);
+      toast.dismiss('zk-progress');
 
       const computedScore = computeCreditScore(age, reps, defs, vol);
       const tier          = scoreToTier(computedScore);
 
-      // Track in Supabase for history pre-fill on next visit
       await insertAttestation({
         user_address:    address,
         attestation_id:  data.attestationId,
@@ -207,9 +211,25 @@ export default function CreditPage() {
       toast.success('Credit data attested on-chain!');
       setStep('redeeming');
     } catch (e: any) {
+      toast.dismiss('zk-progress');
       toast.error(e.message ?? 'Attestation failed');
       setStep('idle');
     }
+  }
+
+  // Poll GET /api/attest?jobId=xxx every 4s until status is done/error
+  async function pollAttestJob(jobId: string, maxWaitMs = 180_000): Promise<any> {
+    const started = Date.now();
+    while (Date.now() - started < maxWaitMs) {
+      await new Promise(r => setTimeout(r, 4_000));
+      const res = await fetch(`/api/attest?jobId=${jobId}`);
+      const data = await res.json();
+
+      if (data.status === 'done')  return data;
+      if (data.status === 'error') throw new Error(data.error ?? 'Attestation failed on oracle');
+      // status === 'pending' → keep polling
+    }
+    throw new Error('Attestation timed out after 3 minutes');
   }
 
   // ── Step 2: Redeem Attestation → CreditRecord ─────────────────

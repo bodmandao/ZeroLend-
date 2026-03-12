@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const ORACLE_URL = (process.env.ORACLE_URL ?? 'https://supreme-space-guacamole-v665jv9q5p9v3pp74-3001.app.github.dev').replace(/\/$/, '');
 
-// ── GET /api/attest?jobId=xxx ─────────────────────────────────
 // Frontend polls this until status === 'done' or 'error'
 export async function GET(req: NextRequest) {
   const jobId = req.nextUrl.searchParams.get('jobId');
