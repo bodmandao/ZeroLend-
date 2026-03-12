@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
     const res = await fetch(`${ORACLE_URL}/attest/status?jobId=${jobId}`, {
       headers: { 'Content-Type': 'application/json' },
     });
+    console.log(res, jobId);
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });
   } catch (err: any) {

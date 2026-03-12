@@ -148,6 +148,21 @@ export async function getTransactionHistory(address: string) {
     .limit(20);
 }
 
+
+// ── Get existing unredeemed attestation for a wallet ──────────
+export async function getExistingAttestation(address: string) {
+  const { data } = await supabase
+    .from('credit_attestations')
+    .select('*')
+    .eq('user_address', address)
+    .eq('redeemed', false)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+  return data ?? null;
+}
+
+// ── Get user loan history for credit prefill ──────────────────
 export async function getUserLoanHistory(address: string) {
   const { data } = await supabase
     .from('loans')

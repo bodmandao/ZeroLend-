@@ -22,6 +22,9 @@ import toast from 'react-hot-toast';
 // ── Wallet age helper ─────────────────────────────────────────
 const PROVABLE_API = 'https://api.provable.com/v2';
 
+// Poll oracle server directly — avoids Next.js/Codespace proxy timeouts on GET
+const ORACLE_URL = (process.env.NEXT_PUBLIC_ORACLE_URL ?? 'http://localhost:3001').replace(/\/$/, '');
+
 async function fetchWalletAgeDays(address: string): Promise<number> {
   try {
     let cursor: string | null = null;
@@ -135,9 +138,82 @@ export default function CreditPage() {
   const previewTier = score !== null ? scoreToTier(score) : null;
   const tierInfo    = creditTier ? getTierInfo(creditTier) : null;
 
+  // ── Background polling ───────────────────────────────────────
+  // Runs independently of the UI — user can navigate away freely.
+  // Saves pending job to localStorage so it survives page refreshes.
+  const STORAGE_KEY = 'zerolend_pending_attest';
+
+  // On mount: resume any pending job from a previous session
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return;
+    try {
+      const job = JSON.parse(saved);
+      // Only resume if job is < 5 minutes old
+      if (Date.now() - job.startedAt > 5 * 60 * 1000) {
+        localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+      setStep('attesting');
+      toast('Resuming ZK proof generation…', { icon: '⚙️', id: 'zk-progress', duration: Infinity });
+      startBackgroundPoll(job.jobId, job.meta);
+    } catch {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  }, []);
+
+  function startBackgroundPoll(jobId: string, meta: any) {
+    const interval = setInterval(async () => {
+      try {
+        const res  = await fetch(`${ORACLE_URL}/attest/status?jobId=${jobId}`);
+        const data = await res.json();
+
+        if (data.status === 'pending') return; // keep polling
+
+        clearInterval(interval);
+        localStorage.removeItem(STORAGE_KEY);
+        toast.dismiss('zk-progress');
+
+        if (data.status === 'error') {
+          toast.error(data.error ?? 'Attestation failed');
+          setStep('idle');
+          return;
+        }
+
+        // Done — finalise
+        const { age, reps, defs, vol } = meta;
+        const computedScore = computeCreditScore(age, reps, defs, vol);
+        const tier          = scoreToTier(computedScore);
+
+        await insertAttestation({
+          user_address:    meta.address,
+          attestation_id:  data.attestationId,
+          wallet_age_days: age,
+          repayments_made: reps,
+          defaults:        defs,
+          total_volume:    vol,
+          computed_score:  computedScore,
+          tier,
+        });
+
+        setAttestation({
+          attId:        data.attestationId,
+          validUntil:   data.validUntil,
+          currentBlock: meta.currentBlock,
+          age, reps, defs, vol,
+          tier, computedScore,
+          txId: data.txId,
+        });
+
+        toast.success('✅ Credit data attested! Mint your record below.', { duration: 8000 });
+        setStep('redeeming');
+      } catch {
+        // Network hiccup — silently retry next tick
+      }
+    }, 4_000);
+  }
+
   // ── Step 1: Oracle Attestation ────────────────────────────────
-  // Fire-and-forget: POST returns jobId instantly, we poll for result.
-  // This avoids 504 timeouts since ZK proving takes 30-120s.
   async function handleAttest() {
     if (!connected || !address) {
       toast.error('Connect your wallet first');
@@ -157,7 +233,6 @@ export default function CreditPage() {
         return;
       }
 
-      // Step 1a: POST to start the job — returns { jobId } immediately
       const startRes = await fetch('/api/attest', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -179,57 +254,25 @@ export default function CreditPage() {
       const { jobId } = await startRes.json();
       if (!jobId) throw new Error('No job ID returned from oracle');
 
-      toast('Generating ZK proof — this takes ~60s…', { icon: '⚙️', duration: 90_000, id: 'zk-progress' });
+      // Save job to localStorage — survives navigation + page refresh
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        jobId,
+        startedAt: Date.now(),
+        meta: { address, age, reps, defs, vol, currentBlock },
+      }));
 
-      // Step 1b: Poll GET /api/attest?jobId=xxx until done or error
-      const data = await pollAttestJob(jobId);
-      toast.dismiss('zk-progress');
-
-      const computedScore = computeCreditScore(age, reps, defs, vol);
-      const tier          = scoreToTier(computedScore);
-
-      await insertAttestation({
-        user_address:    address,
-        attestation_id:  data.attestationId,
-        wallet_age_days: age,
-        repayments_made: reps,
-        defaults:        defs,
-        total_volume:    vol,
-        computed_score:  computedScore,
-        tier,
+      toast('ZK proof generating in background — you can browse freely!', {
+        icon: '⚙️', id: 'zk-progress', duration: Infinity,
       });
 
-      setAttestation({
-        attId:        data.attestationId,
-        validUntil:   data.validUntil,
-        currentBlock,
-        age, reps, defs, vol,
-        tier, computedScore,
-        txId: data.txId,
-      });
+      // Start background polling — non-blocking, user can navigate away
+      startBackgroundPoll(jobId, { address, age, reps, defs, vol, currentBlock });
 
-      toast.success('Credit data attested on-chain!');
-      setStep('redeeming');
     } catch (e: any) {
       toast.dismiss('zk-progress');
       toast.error(e.message ?? 'Attestation failed');
       setStep('idle');
     }
-  }
-
-  // Poll GET /api/attest?jobId=xxx every 4s until status is done/error
-  async function pollAttestJob(jobId: string, maxWaitMs = 180_000): Promise<any> {
-    const started = Date.now();
-    while (Date.now() - started < maxWaitMs) {
-      await new Promise(r => setTimeout(r, 4_000));
-      const res = await fetch(`/api/attest?jobId=${jobId}`);
-      const data = await res.json();
-
-      if (data.status === 'done')  return data;
-      if (data.status === 'error') throw new Error(data.error ?? 'Attestation failed on oracle');
-      // status === 'pending' → keep polling
-    }
-    throw new Error('Attestation timed out after 3 minutes');
   }
 
   // ── Step 2: Redeem Attestation → CreditRecord ─────────────────
@@ -253,6 +296,8 @@ export default function CreditPage() {
         att.validUntil,   // real valid_until from API — not hardcoded
         att.attId
       );
+
+      console.log('[redeem] attRecord:', attRecord);
 
       await executeTransaction({
         programId:    PROGRAM_ID,
