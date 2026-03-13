@@ -16,10 +16,7 @@
 - [Prerequisites](#prerequisites)
 - [Environment Variables](#environment-variables)
 - [Local Development](#local-development)
-- [Deploying the Contract](#deploying-the-contract)
-- [Database Setup](#database-setup)
 - [Pages & Features](#pages--features)
-- [Record Handling](#record-handling)
 - [Tech Stack](#tech-stack)
 
 ---
