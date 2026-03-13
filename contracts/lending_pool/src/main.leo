@@ -1,6 +1,6 @@
 import credits.aleo;
 
-program zerolend_lending_pool_v1.aleo {
+program zerolend_lending_pool_v2.aleo {
 
     // ================================================================
     // RECORDS
@@ -12,7 +12,7 @@ program zerolend_lending_pool_v1.aleo {
         wallet_age_days:   u32,
         repayments_made:   u32,
         defaults:          u32,
-        total_volume:      u64,   
+        total_volume:      u64,   // in microcredits (matches credits.aleo)
         current_score:     u32,
         last_updated:      u32,
         nonce:             field,
@@ -47,18 +47,6 @@ program zerolend_lending_pool_v1.aleo {
         nonce:            field,
     }
 
-    /// Oracle-signed off-chain credit attestation
-    record OracleAttestation {
-        owner:           address,
-        attester:        address,
-        wallet_age_days: u32,
-        repayments_made: u32,
-        defaults:        u32,
-        total_volume:    u64,
-        valid_until:     u32,
-        attestation_id:  field,
-    }
-
     // ================================================================
     // CONSTANTS
     // ================================================================
@@ -70,7 +58,7 @@ program zerolend_lending_pool_v1.aleo {
     const RATE_TIER_4: u64 =  700u64; //  7% — Great
     const RATE_TIER_5: u64 =  400u64; //  4% — Excellent
 
-    // Max loan per tier in microcredits 
+    // Max loan per tier in microcredits (1 ALEO = 1_000_000 microcredits)
     const MAX_LOAN_TIER_1: u64 =    10_000_000u64; //    10 ALEO
     const MAX_LOAN_TIER_2: u64 =    50_000_000u64; //    50 ALEO
     const MAX_LOAN_TIER_3: u64 =   200_000_000u64; //   200 ALEO
@@ -81,35 +69,31 @@ program zerolend_lending_pool_v1.aleo {
     const GRACE_PERIOD: u32 = 8640u32;
 
     // ================================================================
-    // MAPPINGS 
+    // MAPPINGS — public on-chain state
     // ================================================================
 
     mapping protocol_admin:       u8      => address;
-    mapping approved_oracles:     address => bool;
-
-    // Pool state
+    // Pool state (all values in microcredits)
     mapping pool_liquidity:       u8      => u64;
     mapping pool_borrowed:        u8      => u64;
     mapping pool_interest_earned: u8      => u64;
     mapping active_loan_count:    u8      => u32;
 
-    // Loan terms per tier 
+    // Loan terms per tier (in blocks)
     mapping loan_term_blocks:     u8      => u32;
 
     // Nullifier sets
     mapping loan_nullifiers:      field   => bool;
-    mapping used_attestations:    field   => bool;
 
-    // Public aggregate credit stats 
+    // Public aggregate credit stats — no individual data exposed
     mapping aggregate_tier_count: u8      => u32;
 
-   
     @noupgrade
     async constructor(
     ) {}
 
     // ================================================================
-    // HELPER FUNCTIONS
+    // HELPER FUNCTIONS (pure)
     // ================================================================
 
     /// Compute credit score 0-1000 from raw inputs
@@ -178,7 +162,10 @@ program zerolend_lending_pool_v1.aleo {
         return MAX_LOAN_TIER_1;
     }
 
-   
+    // ================================================================
+    // SECTION 1 — PROTOCOL SETUP
+    // ================================================================
+
     /// Initialize protocol. Caller becomes admin and first oracle.
     /// Call once after deployment — guarded against re-initialization.
     async transition initialize() -> Future {
@@ -193,7 +180,6 @@ program zerolend_lending_pool_v1.aleo {
         assert_eq(existing, aleo1handyyun9zlhv56sgkjc7qp3mg0fsk0d8aqamt49g3sds4nu4urqsudpkf);
 
         Mapping::set(protocol_admin,       0u8, admin);
-        Mapping::set(approved_oracles,     admin, true);
         Mapping::set(pool_liquidity,       0u8, 0u64);
         Mapping::set(pool_borrowed,        0u8, 0u64);
         Mapping::set(pool_interest_earned, 0u8, 0u64);
@@ -207,100 +193,51 @@ program zerolend_lending_pool_v1.aleo {
         Mapping::set(loan_term_blocks, 5u8, 259200u32); // ~30 days
     }
 
+    // ================================================================
+    // SECTION 2 — CREDIT ATTESTATION
+    // ================================================================
 
-    /// Admin whitelists an oracle address
-    async transition add_oracle(oracle: address) -> Future {
-        return finalize_add_oracle(self.caller, oracle);
-    }
-
-    async function finalize_add_oracle(caller: address, oracle: address) {
-        let admin: address = Mapping::get(protocol_admin, 0u8);
-        assert_eq(admin, caller);
-        Mapping::set(approved_oracles, oracle, true);
-    }
-
-    /// Admin removes an oracle
-    async transition remove_oracle(oracle: address) -> Future {
-        return finalize_remove_oracle(self.caller, oracle);
-    }
-
-    async function finalize_remove_oracle(caller: address, oracle: address) {
-        let admin: address = Mapping::get(protocol_admin, 0u8);
-        assert_eq(admin, caller);
-        Mapping::set(approved_oracles, oracle, false);
-    }
-
-    /// Oracle submits off-chain credit data and mints a private
-    /// OracleAttestation record to the recipient's wallet.
+    /// User calls this directly with data pre-filled by the frontend from
+    /// on-chain history and ZeroLend DB. Inputs are read-only in the UI.
+    /// Produces a private CreditRecord directly in the user's wallet.
     async transition attest_credit(
-        recipient:        address,
-        wallet_age_days:  u32,
-        repayments_made:  u32,
-        defaults:         u32,
-        total_volume:     u64,
-        valid_for_blocks: u32,
-        current_block:    u32,
-        attestation_id:   field
-    ) -> (OracleAttestation, Future) {
-        let att: OracleAttestation = OracleAttestation {
-            owner:           recipient,
-            attester:        self.caller,
+        wallet_age_days: u32,
+        repayments_made: u32,
+        defaults:        u32,
+        total_volume:    u64,
+        current_block:   u32,
+        record_nonce:    field
+    ) -> (CreditRecord, Future) {
+        let score: u32 = compute_credit_score(
+            wallet_age_days,
+            repayments_made,
+            defaults,
+            total_volume
+        );
+
+        let rec: CreditRecord = CreditRecord {
+            owner:           self.caller as address,
             wallet_age_days: wallet_age_days,
             repayments_made: repayments_made,
             defaults:        defaults,
             total_volume:    total_volume,
-            valid_until:     current_block + valid_for_blocks,
-            attestation_id:  attestation_id,
-        };
-        return (att, finalize_attest_credit(self.caller, attestation_id));
-    }
-
-    async function finalize_attest_credit(oracle: address, attestation_id: field) {
-        let approved: bool = Mapping::get_or_use(approved_oracles, oracle, false);
-        assert(approved);
-        let used: bool = Mapping::get_or_use(used_attestations, attestation_id, false);
-        assert(!used);
-        Mapping::set(used_attestations, attestation_id, true);
-    }
-
-
-
-    /// User redeems OracleAttestation to mint their private CreditRecord.
-    /// Attestation is single-use and consumed here.
-    async transition redeem_attestation(
-        att:           OracleAttestation,
-        current_block: u32,
-        record_nonce:  field
-    ) -> (CreditRecord, Future) {
-        assert(current_block <= att.valid_until);
-        assert_eq(att.owner, self.caller);
-
-        let score: u32 = compute_credit_score(
-            att.wallet_age_days,
-            att.repayments_made,
-            att.defaults,
-            att.total_volume
-        );
-
-        let rec: CreditRecord = CreditRecord {
-            owner:           att.owner,
-            wallet_age_days: att.wallet_age_days,
-            repayments_made: att.repayments_made,
-            defaults:        att.defaults,
-            total_volume:    att.total_volume,
             current_score:   score,
             last_updated:    current_block,
             nonce:           record_nonce,
         };
 
         let tier: u8 = score_to_tier(score);
-        return (rec, finalize_redeem_attestation(tier));
+        return (rec, finalize_attest_credit(tier));
     }
 
-    async function finalize_redeem_attestation(tier: u8) {
+    async function finalize_attest_credit(tier: u8) {
         let count: u32 = Mapping::get_or_use(aggregate_tier_count, tier, 0u32);
         Mapping::set(aggregate_tier_count, tier, count + 1u32);
     }
+
+    // ================================================================
+    // SECTION 3 — CREDIT RECORD MANAGEMENT (prove_tier, request_loan, etc.)
+    // ================================================================
 
     /// User generates a CreditTierProof from their CreditRecord.
     /// Reveals ONLY the tier number (1-5). Zero raw data exposed.
@@ -313,7 +250,7 @@ program zerolend_lending_pool_v1.aleo {
     ) -> (CreditRecord, CreditTierProof) {
         let tier: u8 = score_to_tier(rec.current_score);
 
-        // Re-issue record back to owner
+        // Re-issue record back to owner (Leo records are consumed on use)
         let returned_rec: CreditRecord = CreditRecord {
             owner:           rec.owner,
             wallet_age_days: rec.wallet_age_days,
@@ -336,7 +273,12 @@ program zerolend_lending_pool_v1.aleo {
         return (returned_rec, proof);
     }
 
+    // ================================================================
+    // SECTION 5 — LENDING POOL (credits.aleo native)
+    // ================================================================
+
     /// Lender deposits ALEO credits into the pool.
+    /// Uses credits.aleo/transfer_private to move funds to the pool address.
     /// Returns change to lender + private LenderDeposit receipt.
     async transition deposit(
         input_credits: credits.aleo/credits,
@@ -393,6 +335,9 @@ program zerolend_lending_pool_v1.aleo {
         }
     }
 
+    // ================================================================
+    // SECTION 6 — LOAN LIFECYCLE
+    // ================================================================
 
     /// Borrower requests a loan using their CreditTierProof.
     /// Pool transfers ALEO credits privately to borrower.
@@ -587,8 +532,13 @@ program zerolend_lending_pool_v1.aleo {
         Mapping::set(aggregate_tier_count, new_tier, new_count + 1u32);
     }
 
+    // ================================================================
+    // SECTION 7 — SOLVENCY PROOF (public, verifiable by anyone)
+    // ================================================================
 
     /// Publicly proves pool solvency: borrowed <= liquidity.
+    /// Individual positions remain fully private.
+    /// This is ZeroLend's core trustless guarantee.
     async transition prove_solvency() -> Future {
         return finalize_prove_solvency();
     }
