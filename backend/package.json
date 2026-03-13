@@ -3,6 +3,7 @@
     "@provablehq/sdk": "^0.9.17",
     "cors": "^2.8.6",
     "crypto": "^1.0.1",
+    "dotenv": "^17.3.1",
     "express": "^5.2.1"
   },
   "scripts": {
@@ -12,5 +13,6 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6"
-  }
+  },
+  "type": "module"
 }

@@ -23,7 +23,6 @@ import toast from 'react-hot-toast';
 const PROVABLE_API = 'https://api.provable.com/v2';
 
 // Poll oracle server directly — avoids Next.js/Codespace proxy timeouts on GET
-const ORACLE_URL = (process.env.NEXT_PUBLIC_ORACLE_URL ?? 'http://localhost:3001').replace(/\/$/, '');
 
 async function fetchWalletAgeDays(address: string): Promise<number> {
   try {
@@ -59,7 +58,7 @@ async function fetchWalletAgeDays(address: string): Promise<number> {
 }
 
 export default function CreditPage() {
-  const { transactionStatus, connected, address, executeTransaction: executeHandler } = useWallet();
+  const { transactionStatus, requestRecords, decrypt, connected, address, executeTransaction: executeHandler } = useWallet();
   const {
     wallet, creditScore, creditTier, creditRecord,
     setCreditRecord, setTierProof
@@ -75,7 +74,7 @@ export default function CreditPage() {
   const [prefilling, setPrefilling]       = useState(false);
   const [prefillDone, setPrefillDone]     = useState(false);
   const [prefillSource, setPrefillSource] = useState<Record<string, 'chain' | 'supabase' | 'new'>>({});
-  const [step, setStep]                   = useState<'idle' | 'attesting' | 'redeeming' | 'proving' | 'done'>('idle');
+  const [step, setStep]                   = useState<'idle' | 'attesting' | 'proving' | 'done'>('idle');
   const [showRawData, setShowRawData]     = useState(false);
   const [attestation, setAttestation]     = useState<any>(null);
   const [proofExpiry, setProofExpiry]     = useState('200');
@@ -85,6 +84,39 @@ export default function CreditPage() {
     if (!connected || !address || prefillDone) return;
     prefillForm(address);
   }, [connected, address]);
+
+  // Auto-detect existing CreditRecord in wallet — skip Step 1 for returning users
+  useEffect(() => {
+    if (!connected || !requestRecords || !decrypt || creditScore !== null) return;
+    (async () => {
+      try {
+        const records = await requestRecords(PROGRAM_ID, false);
+        const existing = records?.find((r: any) => {
+          const isOwner  = r.owner === address || r.sender === address;
+          return isOwner && r.recordName === 'CreditRecord' && !r.spent;
+        });
+        if (!existing) return;
+        const decrypted = await decrypt((existing as any).recordCiphertext);
+        if (!decrypted) return;
+        const parseField = (str: string, key: string) =>
+          str.match(new RegExp(`${key}:\\s*([^,}]+)`))?.[1]?.trim() ?? '';
+        const score = parseInt(parseField(decrypted, 'current_score')) || 0;
+        const tier  = scoreToTier(score);
+        setCreditRecord({
+          owner:           address!,
+          wallet_age_days: parseField(decrypted, 'wallet_age_days'),
+          repayments_made: parseField(decrypted, 'repayments_made'),
+          defaults:        parseField(decrypted, 'defaults'),
+          total_volume:    parseField(decrypted, 'total_volume'),
+          current_score:   parseField(decrypted, 'current_score'),
+          last_updated:    parseField(decrypted, 'last_updated'),
+          nonce:           parseField(decrypted, 'nonce'),
+        }, score, tier);
+        setStep('done');
+        toast('Existing credit record found in your wallet.', { icon: '✅' });
+      } catch { /* wallet not ready yet */ }
+    })();
+  }, [connected, requestRecords, decrypt]);
 
   async function prefillForm(addr: string) {
     setPrefilling(true);
@@ -138,230 +170,119 @@ export default function CreditPage() {
   const previewTier = score !== null ? scoreToTier(score) : null;
   const tierInfo    = creditTier ? getTierInfo(creditTier) : null;
 
-  // ── Background polling ───────────────────────────────────────
-  // Runs independently of the UI — user can navigate away freely.
-  // Saves pending job to localStorage so it survives page refreshes.
-  const STORAGE_KEY = 'zerolend_pending_attest';
-
-  // On mount: resume any pending job from a previous session
-  useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return;
-    try {
-      const job = JSON.parse(saved);
-      // Only resume if job is < 5 minutes old
-      if (Date.now() - job.startedAt > 5 * 60 * 1000) {
-        localStorage.removeItem(STORAGE_KEY);
-        return;
-      }
-      setStep('attesting');
-      toast('Resuming ZK proof generation…', { icon: '⚙️', id: 'zk-progress', duration: Infinity });
-      startBackgroundPoll(job.jobId, job.meta);
-    } catch {
-      localStorage.removeItem(STORAGE_KEY);
-    }
-  }, []);
-
-  function startBackgroundPoll(jobId: string, meta: any) {
-    const interval = setInterval(async () => {
-      try {
-        const res  = await fetch(`${ORACLE_URL}/attest/status?jobId=${jobId}`);
-        const data = await res.json();
-
-        if (data.status === 'pending') return; // keep polling
-
-        clearInterval(interval);
-        localStorage.removeItem(STORAGE_KEY);
-        toast.dismiss('zk-progress');
-
-        if (data.status === 'error') {
-          toast.error(data.error ?? 'Attestation failed');
-          setStep('idle');
-          return;
-        }
-
-        // Done — finalise
-        const { age, reps, defs, vol } = meta;
-        const computedScore = computeCreditScore(age, reps, defs, vol);
-        const tier          = scoreToTier(computedScore);
-
-        await insertAttestation({
-          user_address:    meta.address,
-          attestation_id:  data.attestationId,
-          wallet_age_days: age,
-          repayments_made: reps,
-          defaults:        defs,
-          total_volume:    vol,
-          computed_score:  computedScore,
-          tier,
-        });
-
-        setAttestation({
-          attId:        data.attestationId,
-          validUntil:   data.validUntil,
-          currentBlock: meta.currentBlock,
-          age, reps, defs, vol,
-          tier, computedScore,
-          txId: data.txId,
-        });
-
-        toast.success('✅ Credit data attested! Mint your record below.', { duration: 8000 });
-        setStep('redeeming');
-      } catch {
-        // Network hiccup — silently retry next tick
-      }
-    }, 4_000);
+  // ── Step 1: Oracle Attestation ────────────────────────────────
+  // Fetch, validate, and decrypt the unspent CreditRecord from the user's wallet
+  async function fetchCreditRecord(): Promise<string | null> {
+    const records = await requestRecords?.(PROGRAM_ID, true);
+    console.log('Fetched wallet records for credit record lookup:', records);
+    const rec = records?.find((r: any) => {
+      const isOwner  = r.owner === address || r.sender === address;
+      const isRecord = r.recordName === 'CreditRecord';
+      return isOwner && isRecord && !r.spent;
+    });
+    if (!rec) return null;
+    const decrypted = await decrypt?.((rec as any).recordCiphertext);
+    return decrypted ?? null;
   }
 
-  // ── Step 1: Oracle Attestation ────────────────────────────────
+  // ── Step 1: Attest — user wallet calls attest_credit directly ─
+  // Data is pre-filled from chain/DB. Inputs are read-only.
+  // User wallet proves the ZK circuit and the CreditRecord lands in their wallet.
   async function handleAttest() {
-    if (!connected || !address) {
-      toast.error('Connect your wallet first');
-      return;
-    }
+    if (!connected || !address) { toast.error('Connect your wallet first'); return; }
     setStep('attesting');
     try {
       const age  = parseInt(form.walletAgeDays)  || 0;
       const reps = parseInt(form.repaymentsMade) || 0;
       const defs = parseInt(form.defaults)       || 0;
       const vol  = aleoToMicro(parseFloat(form.totalVolume) || 0);
-
       const currentBlock = await getCurrentBlockHeight();
-      if (!currentBlock) {
-        toast.error('Could not fetch block height — try again.');
-        setStep('idle');
-        return;
-      }
+      if (!currentBlock) { toast.error('Could not fetch block height'); setStep('idle'); return; }
+      const nonce = randomField();
 
-      const startRes = await fetch('/api/attest', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          recipient:        address,
-          walletAgeDays:    age,
-          repaymentsMade:   reps,
-          defaults:         defs,
-          totalVolumeMicro: vol,
-          currentBlock,
-        }),
+      await executeTransaction({
+        programId:    PROGRAM_ID,
+        functionName: 'attest_credit',
+        inputs: [
+          `${age}u32`,
+          `${reps}u32`,
+          `${defs}u32`,
+          `${vol}u64`,
+          `${currentBlock}u32`,
+          nonce,
+        ],
+      }, executeHandler, transactionStatus);
+
+      const computedScore = computeCreditScore(age, reps, defs, vol);
+      const tier          = scoreToTier(computedScore);
+
+      await insertAttestation({
+        user_address:    address,
+        attestation_id:  nonce,
+        wallet_age_days: age,
+        repayments_made: reps,
+        defaults:        defs,
+        total_volume:    vol,
+        computed_score:  computedScore,
+        tier,
       });
 
-      if (!startRes.ok) {
-        const err = await startRes.json().catch(() => ({}));
-        throw new Error(err.error ?? `API error ${startRes.status}`);
+      // Fetch the real decrypted record from wallet — has actual VM _nonce
+      const decryptedRec = await fetchCreditRecord();
+      if (decryptedRec) {
+        // Parse fields from decrypted record string for Zustand store
+        const parseField = (str: string, key: string) =>
+          str.match(new RegExp(`${key}:\\s*([^,}]+)`))?.[1]?.trim() ?? '';
+        setCreditRecord({
+          owner:           address,
+          wallet_age_days: parseField(decryptedRec, 'wallet_age_days'),
+          repayments_made: parseField(decryptedRec, 'repayments_made'),
+          defaults:        parseField(decryptedRec, 'defaults'),
+          total_volume:    parseField(decryptedRec, 'total_volume'),
+          current_score:   parseField(decryptedRec, 'current_score'),
+          last_updated:    parseField(decryptedRec, 'last_updated'),
+          nonce:           parseField(decryptedRec, 'nonce'),
+        }, computedScore, tier);
+      } else {
+        // Fallback if wallet indexing is slow — prove_tier will re-fetch
+        setCreditRecord({
+          owner: address, wallet_age_days: `${age}u32`, repayments_made: `${reps}u32`,
+          defaults: `${defs}u32`, total_volume: `${vol}u64`,
+          current_score: `${computedScore}u32`, last_updated: `${currentBlock}u32`, nonce,
+        }, computedScore, tier);
       }
 
-      const { jobId } = await startRes.json();
-      if (!jobId) throw new Error('No job ID returned from oracle');
-
-      // Save job to localStorage — survives navigation + page refresh
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        jobId,
-        startedAt: Date.now(),
-        meta: { address, age, reps, defs, vol, currentBlock },
-      }));
-
-      toast('ZK proof generating in background — you can browse freely!', {
-        icon: '⚙️', id: 'zk-progress', duration: Infinity,
-      });
-
-      // Start background polling — non-blocking, user can navigate away
-      startBackgroundPoll(jobId, { address, age, reps, defs, vol, currentBlock });
-
+      toast.success('Credit record minted to your wallet!');
+      setStep('done');
     } catch (e: any) {
-      toast.dismiss('zk-progress');
       toast.error(e.message ?? 'Attestation failed');
       setStep('idle');
     }
   }
 
-  // ── Step 2: Redeem Attestation → CreditRecord ─────────────────
-  // User's own wallet signs this — only the recipient can redeem.
-  async function handleRedeem() {
-    if (!attestation || !address) return;
-    setStep('redeeming');
-    try {
-      const nonce      = randomField();
-      const att        = attestation;
-      const currentBlk = await getCurrentBlockHeight();
-
-      // Build the OracleAttestation record string using values returned by the API
-      const attRecord = buildOracleAttestation(
-        address,          // owner = recipient (the user)
-        address,          // attester shown as user address on frontend (oracle is server-side)
-        att.age,
-        att.reps,
-        att.defs,
-        att.vol,
-        att.validUntil,   // real valid_until from API — not hardcoded
-        att.attId
-      );
-
-      console.log('[redeem] attRecord:', attRecord);
-
-      await executeTransaction({
-        programId:    PROGRAM_ID,
-        functionName: 'redeem_attestation',
-        inputs:       [attRecord, `${currentBlk}u32`, nonce],
-      }, executeHandler, transactionStatus);
-
-      await markAttestationRedeemed(att.attId);
-
-      const creditRec: any = {
-        owner:           address,
-        wallet_age_days: `${att.age}u32`,
-        repayments_made: `${att.reps}u32`,
-        defaults:        `${att.defs}u32`,
-        total_volume:    `${att.vol}u64`,
-        current_score:   `${att.computedScore}u32`,
-        last_updated:    `${currentBlk}u32`,
-        nonce,
-      };
-
-      setCreditRecord(creditRec, att.computedScore, att.tier);
-      toast.success('Credit record minted to your wallet!');
-      setStep('done');
-    } catch (e: any) {
-      toast.error(e.message ?? 'Redemption failed');
-      setStep('attesting');
-    }
-  }
-
-  // ── Step 3: Prove Tier ────────────────────────────────────────
   async function handleProveTier() {
-    if (!creditRecord || !address) return;
+    if (!address) return;
     setStep('proving');
     try {
       const pNonce       = randomField();
       const expiry       = parseInt(proofExpiry) || 200;
       const currentBlock = await getCurrentBlockHeight();
 
-      const rec = [
-        `{owner: ${creditRecord.owner}`,
-        `wallet_age_days: ${creditRecord.wallet_age_days}`,
-        `repayments_made: ${creditRecord.repayments_made}`,
-        `defaults: ${creditRecord.defaults}`,
-        `total_volume: ${creditRecord.total_volume}`,
-        `current_score: ${creditRecord.current_score}`,
-        `last_updated: ${creditRecord.last_updated}`,
-        `nonce: ${creditRecord.nonce}}`,
-      ].join(', ');
+      // Fetch and decrypt the real unspent CreditRecord from wallet
+      const decryptedRec = await fetchCreditRecord();
+      if (!decryptedRec) {
+        toast.error('No unspent CreditRecord found in your wallet — complete Step 1 first.');
+        setStep('done');
+        return;
+      }
 
       await executeTransaction({
         programId:    PROGRAM_ID,
         functionName: 'prove_tier',
-        inputs:       [rec, pNonce, `${expiry}u32`, `${currentBlock}u32`, '1field'],
+        inputs:       [decryptedRec, pNonce, `${expiry}u32`, `${currentBlock}u32`, '1field'],
       }, executeHandler, transactionStatus);
 
-      // Store tier proof string in Zustand for borrow page
-      const proofStr = [
-        `{owner: ${address}`,
-        `tier: ${creditTier}u8`,
-        `org_id: 1field`,
-        `expires_at: ${currentBlock + expiry}u32`,
-        `nonce: ${pNonce}}`,
-      ].join(', ');
-
+      const proofStr = `{owner: ${address}, tier: ${creditTier}u8, org_id: 1field, expires_at: ${currentBlock + expiry}u32, nonce: ${pNonce}}`;
       setTierProof(proofStr);
       toast.success('Tier proof generated! Ready to borrow.');
       setStep('done');
@@ -528,10 +449,11 @@ export default function CreditPage() {
                 </div>
                 <div className="relative">
                   <input
-                    className={`zero-input ${key === 'totalVolume' ? 'pr-14' : ''} ${prefilling ? 'opacity-50' : ''}`}
+                    className={`zero-input ${key === 'totalVolume' ? 'pr-14' : ''} ${(prefilling || prefillDone) ? 'opacity-60 cursor-not-allowed' : ''}`}
                     type="number"
                     placeholder={prefilling ? 'Loading…' : '0'}
-                    disabled={prefilling}
+                    disabled={prefilling || prefillDone || step !== 'idle'}
+                    readOnly={prefillDone}
                     value={form[key as keyof typeof form]}
                     onChange={(e) => setForm(f => ({ ...f, [key]: e.target.value }))}
                   />
@@ -580,43 +502,6 @@ export default function CreditPage() {
         {/* Steps 2 & 3 */}
         <div className="space-y-4">
 
-          {/* Step 2 */}
-          <div className="glass rounded-2xl p-5"
-            style={step !== 'redeeming' && creditScore === null ? { opacity: 0.4, pointerEvents: 'none' } : {}}>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
-                style={{
-                  background: step === 'redeeming' ? 'rgba(0,212,255,0.15)' : 'rgba(255,255,255,0.05)',
-                  border: `1px solid ${step === 'redeeming' ? 'rgba(0,212,255,0.3)' : '#1a2540'}`,
-                  fontFamily: "'Syne', sans-serif",
-                  color: step === 'redeeming' ? '#00d4ff' : '#4a5878',
-                }}>2</div>
-              <div>
-                <h3 className="text-sm font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
-                  Mint Credit Record
-                </h3>
-                <p className="text-xs text-zero-text-dim">Redeem attestation → private record</p>
-              </div>
-            </div>
-            <p className="text-xs text-zero-text-dim mb-4 leading-relaxed">
-              Your attestation is minted as a private Aleo record. Only you can see
-              the underlying data using your view key.
-            </p>
-            <button
-              onClick={handleRedeem}
-              disabled={step !== 'redeeming'}
-              className="btn-primary w-full flex items-center justify-center gap-2"
-            >
-              {step === 'redeeming' && attestation ? (
-                <><div className="zk-loader" style={{ width: 14, height: 14 }} />Minting…</>
-              ) : creditScore !== null ? (
-                <><CheckCircle size={14} className="text-zero-green" />Record Minted</>
-              ) : (
-                'Mint Credit Record'
-              )}
-            </button>
-          </div>
-
           {/* Step 3 */}
           <div className="glass rounded-2xl p-5"
             style={creditScore === null ? { opacity: 0.4, pointerEvents: 'none' } : {}}>
@@ -627,7 +512,7 @@ export default function CreditPage() {
                   border: `1px solid ${creditScore !== null ? 'rgba(124,58,237,0.4)' : '#1a2540'}`,
                   fontFamily: "'Syne', sans-serif",
                   color: creditScore !== null ? '#a855f7' : '#4a5878',
-                }}>3</div>
+                }}>2</div>
               <div>
                 <h3 className="text-sm font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
                   Generate Tier Proof

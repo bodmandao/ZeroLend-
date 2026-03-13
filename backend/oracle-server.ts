@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors    from 'cors';
 import { randomUUID } from 'crypto';
@@ -16,19 +17,48 @@ const PROGRAM_ID = process.env.PROGRAM_ID ?? 'zerolend_lending_pool_v1.aleo';
 const ORACLE_KEY = process.env.ORACLE_PRIVATE_KEY!;
 const NETWORK_URL = 'https://api.explorer.provable.com/v2';
 
-app.use(cors());
+// Allow requests from any GitHub Codespace origin (both ports 3000 and 3001)
+// In production lock this down to your actual domain
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (curl, Postman) or any github.dev / localhost origin
+    if (!origin || origin.includes('github.dev') || origin.includes('localhost')) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS blocked: ${origin}`));
+    }
+  },
+  methods:     ['GET', 'POST', 'OPTIONS'],
+  credentials: true,
+}));
 app.use(express.json());
 
 // ── In-memory job store ───────────────────────────────────────
-// For production use Redis. For buildathon demo this is fine.
 type JobStatus = 'pending' | 'done' | 'error';
 interface Job {
   status:    JobStatus;
   result?:   Record<string, any>;
   error?:    string;
+  logs:      string[];
   createdAt: number;
 }
-const jobs = new Map<string, Job>();
+const jobs     = new Map<string, Job>();
+// SSE subscribers: jobId → array of res objects
+const subscribers = new Map<string, any[]>();
+
+function pushLog(jobId: string, message: string) {
+  const job = jobs.get(jobId);
+  if (!job) return;
+  job.logs.push(message);
+  // Push to any SSE subscribers for this job
+  const subs = subscribers.get(jobId) ?? [];
+  for (const res of subs) {
+    try { res.write(`data: ${JSON.stringify({ log: message })}
+
+`); } catch {}
+  }
+  console.log(`[oracle][${jobId}] ${message}`);
+}
 
 // Clean up jobs older than 10 minutes
 setInterval(() => {
@@ -108,27 +138,41 @@ async function runAttestation(jobId: string, params: {
 
     console.log(`[oracle][${jobId}] done — txId: ${txId}`);
 
+    // Include oracle's own address so frontend can build the correct attRecord
+    const oracleAddress = oracleAccount.address().to_string();
+
     jobs.set(jobId, {
-      status:    'done',
+      status: 'done',
       createdAt: jobs.get(jobId)!.createdAt,
       result: {
         txId,
-        attestationId:    attId,
-        validUntil:       currentBlock + validForBlocks,
+        attestationId: attId,
+        validUntil: currentBlock + validForBlocks,
+        oracleAddress, // ← frontend needs this for buildOracleAttestation
         recipient,
-        walletAgeDays:    age,
-        repaymentsMade:   reps,
-        defaults:         defs,
+        walletAgeDays: age,
+        repaymentsMade: reps,
+        defaults: defs,
         totalVolumeMicro: vol,
       },
+      logs: []
     });
   } catch (err: any) {
-    console.error(`[oracle][${jobId}] failed:`, err.message);
+    const msg = err.message ?? 'Attestation failed';
+    pushLog(jobId, `❌ Error: ${msg}`);
     jobs.set(jobId, {
       status:    'error',
-      error:     err.message ?? 'Attestation failed',
-      createdAt: jobs.get(jobId)!.createdAt,
+      error:     msg,
+      logs:      jobs.get(jobId)?.logs ?? [],
+      createdAt: jobs.get(jobId)?.createdAt ?? Date.now(),
     });
+    // Notify SSE subscribers of error
+    const subs = subscribers.get(jobId) ?? [];
+    for (const res of subs) {
+      try { res.write(`data: ${JSON.stringify({ error: msg })}
+
+`); res.end(); } catch {}
+    }
   }
 }
 
@@ -157,7 +201,7 @@ app.post('/attest', (req, res) => {
   const validForBlocks = 360;
 
   // Register job as pending
-  jobs.set(jobId, { status: 'pending', createdAt: Date.now() });
+  jobs.set(jobId, { status: 'pending', logs: [], createdAt: Date.now() });
 
   // Start proving in background — don't await
   runAttestation(jobId, { recipient, age, reps, defs, vol, currentBlock, attId, validForBlocks });
@@ -175,18 +219,65 @@ app.get('/attest/status', (req, res) => {
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
   if (job.status === 'pending') {
-    return res.json({ status: 'pending' });
+    return res.json({ status: 'pending', logs: job.logs });
   }
   if (job.status === 'error') {
-    return res.status(500).json({ status: 'error', error: job.error });
+    return res.status(500).json({ status: 'error', error: job.error, logs: job.logs });
   }
-  // done
-  return res.json({ status: 'done', ...job.result });
+  return res.json({ status: 'done', logs: job.logs, ...job.result });
+});
+
+// ── GET /attest/stream?jobId=xxx ──────────────────────────────
+// Server-Sent Events endpoint for real-time log streaming
+app.get('/attest/stream', (req, res) => {
+  const jobId = req.query.jobId as string;
+  if (!jobId) { res.status(400).end(); return; }
+
+  res.setHeader('Content-Type',  'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection',    'keep-alive');
+  res.flushHeaders();
+
+  const job = jobs.get(jobId);
+  if (!job) { res.write(`data: ${JSON.stringify({ error: 'Job not found' })}
+
+`); res.end(); return; }
+
+  // Send all existing logs immediately (catch-up for late subscribers)
+  for (const log of job.logs) {
+    res.write(`data: ${JSON.stringify({ log })}
+
+`);
+  }
+
+  // If already done/error, close immediately
+  if (job.status !== 'pending') { res.end(); return; }
+
+  // Register as subscriber for future logs
+  const subs = subscribers.get(jobId) ?? [];
+  subs.push(res);
+  subscribers.set(jobId, subs);
+
+  // Clean up on disconnect
+  req.on('close', () => {
+    const remaining = (subscribers.get(jobId) ?? []).filter(r => r !== res);
+    subscribers.set(jobId, remaining);
+  });
 });
 
 // ── Health check ──────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`[oracle] server running on port ${PORT}`);
+  console.log(`[oracle] CORS allowed for: *.github.dev, localhost`);
+});
+
+// Prevent the process from dying on unhandled errors
+// (ZK proving errors should be caught per-job, not kill the server)
+process.on('unhandledRejection', (reason) => {
+  console.error('[oracle] unhandledRejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[oracle] uncaughtException:', err);
 });
