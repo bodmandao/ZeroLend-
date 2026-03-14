@@ -1,127 +1,100 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import type {
-  WalletState, PoolStats, CreditRecord,
-  LoanRecord, LenderDeposit, TransactionStatus
-} from '../types';
 
+
+import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import type { TierLevel, PoolStats } from '../types';
+
+// ── Wallet state (not persisted) ──────────────────────────────
+export interface WalletState {
+  connected:  boolean;
+  address:    string | null;
+  publicKey:  string | null;
+  balance:    number; // microcredits
+}
+
+// ── Store shape ───────────────────────────────────────────────
 interface ZeroLendStore {
-  // Wallet
+  // Wallet — reset on every page load (wallet must reconnect)
   wallet: WalletState;
   setWallet: (w: Partial<WalletState>) => void;
-  disconnectWallet: () => void;
+  resetWallet: () => void;
 
-  // Pool
+  // Credit — persisted: survives refresh
+  creditScore:  number | null;
+  creditTier:   TierLevel | null;
+  creditRecord: Record<string, string> | null;
+  tierProof:    string | null;
+  setCreditRecord: (rec: Record<string, string>, score: number, tier: TierLevel) => void;
+  setTierProof:    (proof: string) => void;
+  clearCredit:     () => void;
+
+  // Pool stats — not persisted (fetched fresh)
   poolStats: PoolStats | null;
   setPoolStats: (s: PoolStats) => void;
 
-  // User credit
-  creditRecord: CreditRecord | null;
-  creditScore: number | null;
-  creditTier: number | null;
-  setCreditRecord: (r: CreditRecord, score: number, tier: number) => void;
-  clearCreditRecord: () => void;
+  // Loans & deposits (local optimistic state — not persisted, re-fetched from DB)
+  loans:    any[];
+  deposits: any[];
+  addLoan:    (loan: any)    => void;
+  addDeposit: (deposit: any) => void;
 
-  // Tier proof (session only)
-  tierProof: string | null;
-  setTierProof: (p: string | null) => void;
-
-  // Active loans
-  activeLoans: LoanRecord[];
-  setActiveLoans: (loans: LoanRecord[]) => void;
-  addLoan: (loan: LoanRecord) => void;
-  removeLoan: (loanId: string) => void;
-
-  // Deposits
-  deposits: LenderDeposit[];
-  setDeposits: (deps: LenderDeposit[]) => void;
-  addDeposit: (dep: LenderDeposit) => void;
-
-  // Transactions
-  transactions: TransactionStatus[];
-  addTransaction: (tx: TransactionStatus) => void;
-  updateTransaction: (id: string, update: Partial<TransactionStatus>) => void;
-
-  // UI
-  sidebarOpen: boolean;
-  setSidebarOpen: (v: boolean) => void;
+  // Transaction history (not persisted)
+  transactions: any[];
+  addTransaction: (tx: any) => void;
 }
+
+const DEFAULT_WALLET: WalletState = {
+  connected: false,
+  address:   null,
+  publicKey: null,
+  balance:   0,
+};
 
 export const useStore = create<ZeroLendStore>()(
   persist(
     (set) => ({
-      // Wallet
-      wallet: { connected: false, address: null, publicKey: null, balance: 0 },
-      setWallet: (w) =>
-        set((s) => ({ wallet: { ...s.wallet, ...w } })),
-      disconnectWallet: () =>
-        set({
-          wallet: { connected: false, address: null, publicKey: null, balance: 0 },
-          creditRecord: null,
-          creditScore: null,
-          creditTier: null,
-          tierProof: null,
-          activeLoans: [],
-          deposits: [],
-        }),
+      // ── Wallet ──────────────────────────────────────────────
+      wallet: DEFAULT_WALLET,
+      setWallet:  (w) => set((s) => ({ wallet: { ...s.wallet, ...w } })),
+      resetWallet: () => set({ wallet: DEFAULT_WALLET }),
 
-      // Pool
-      poolStats: null,
+      // ── Credit ──────────────────────────────────────────────
+      creditScore:  null,
+      creditTier:   null,
+      creditRecord: null,
+      tierProof:    null,
+
+      setCreditRecord: (rec, score, tier) =>
+        set({ creditRecord: rec, creditScore: score, creditTier: tier }),
+
+      setTierProof: (proof) => set({ tierProof: proof }),
+
+      clearCredit: () =>
+        set({ creditScore: null, creditTier: null, creditRecord: null, tierProof: null }),
+
+      // ── Pool stats ───────────────────────────────────────────
+      poolStats:    null,
       setPoolStats: (s) => set({ poolStats: s }),
 
-      // Credit
-      creditRecord: null,
-      creditScore: null,
-      creditTier: null,
-      setCreditRecord: (r, score, tier) =>
-        set({ creditRecord: r, creditScore: score, creditTier: tier }),
-      clearCreditRecord: () =>
-        set({ creditRecord: null, creditScore: null, creditTier: null }),
-
-      // Tier proof
-      tierProof: null,
-      setTierProof: (p) => set({ tierProof: p }),
-
-      // Loans
-      activeLoans: [],
-      setActiveLoans: (loans) => set({ activeLoans: loans }),
-      addLoan: (loan) =>
-        set((s) => ({ activeLoans: [...s.activeLoans, loan] })),
-      removeLoan: (loanId) =>
-        set((s) => ({
-          activeLoans: s.activeLoans.filter((l) => l.loan_id !== loanId),
-        })),
-
-      // Deposits
+      // ── Loans & deposits ─────────────────────────────────────
+      loans:    [],
       deposits: [],
-      setDeposits: (deps) => set({ deposits: deps }),
-      addDeposit: (dep) =>
-        set((s) => ({ deposits: [...s.deposits, dep] })),
+      addLoan:    (loan)    => set((s) => ({ loans:    [loan,    ...s.loans]    })),
+      addDeposit: (deposit) => set((s) => ({ deposits: [deposit, ...s.deposits] })),
 
-      // Transactions
+      // ── Transactions ─────────────────────────────────────────
       transactions: [],
-      addTransaction: (tx) =>
-        set((s) => ({ transactions: [tx, ...s.transactions.slice(0, 49)] })),
-      updateTransaction: (id, update) =>
-        set((s) => ({
-          transactions: s.transactions.map((t) =>
-            t.id === id ? { ...t, ...update } : t
-          ),
-        })),
-
-      // UI
-      sidebarOpen: false,
-      setSidebarOpen: (v) => set({ sidebarOpen: v }),
+      addTransaction: (tx) => set((s) => ({ transactions: [tx, ...s.transactions] })),
     }),
     {
       name: 'zerolend-store',
-      partialize: (s) => ({
-        wallet: s.wallet,
-        creditRecord: s.creditRecord,
-        creditScore: s.creditScore,
-        creditTier: s.creditTier,
-        activeLoans: s.activeLoans,
-        deposits: s.deposits,
+      storage: createJSONStorage(() => localStorage),
+      // Only persist credit state — everything else is transient or re-fetched
+      partialize: (state) => ({
+        creditScore:  state.creditScore,
+        creditTier:   state.creditTier,
+        creditRecord: state.creditRecord,
+        tierProof:    state.tierProof,
       }),
     }
   )

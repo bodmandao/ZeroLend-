@@ -59,7 +59,7 @@ export default function CreditPage() {
   const { transactionStatus, decrypt, connected, address, executeTransaction: executeHandler } = useWallet();
   const {
     wallet, creditScore, creditTier, creditRecord,
-    setCreditRecord, setTierProof
+    setCreditRecord, setTierProof, clearCredit
   } = useStore();
 
   const [form, setForm] = useState({
@@ -78,18 +78,31 @@ export default function CreditPage() {
   const [attestation, setAttestation]     = useState<any>(null);
   const [proofExpiry, setProofExpiry]     = useState('200');
 
+  // ── Clear all state when wallet disconnects or changes ───────
+  useEffect(() => {
+    if (!connected || !address) {
+      // Wallet disconnected — reset everything
+      clearCredit();
+      setPrefillDone(false);
+      setStep('idle');
+      setForm({ walletAgeDays: '', repaymentsMade: '', defaults: '', totalVolume: '' });
+    }
+  }, [connected, address]);
+
   // ── Auto-prefill when wallet connects ────────────────────────
   useEffect(() => {
     if (!connected || !address) return;
-    // Reset prefill state on every wallet connect so it always re-runs
+    // Always clear previous wallet's credit state before prefilling new one
+    clearCredit();
     setPrefillDone(false);
+    setStep('idle');
     setForm({ walletAgeDays: '', repaymentsMade: '', defaults: '', totalVolume: '' });
     prefillForm(address);
-  }, [connected, address]);
+  }, [address]); // address change covers both new connect and wallet switch
 
   // Auto-detect existing CreditRecord — look up saved txId from DB, fetch ciphertext from API
   useEffect(() => {
-    if (!connected || !address || !decrypt || creditScore !== null) return;
+    if (!connected || !address || !decrypt) return;
     (async () => {
       try {
         const txId = await getAttestationTxId(address);
@@ -97,7 +110,6 @@ export default function CreditPage() {
         const cipher = await waitForRecordCiphertext(txId, 3, 2_000); // quick check, 3 attempts
         if (!cipher) return;
         const decrypted = await decrypt(cipher);
-        console.log('Decrypted existing record:', decrypted);
         if (!decrypted) return;
         const parseField = (s: string, k: string) =>
           s.match(new RegExp(`${k}:\\s*([^,}]+)`))?.[1]?.trim() ?? '';
@@ -117,7 +129,7 @@ export default function CreditPage() {
         toast('Existing credit record found.', { icon: '✅' });
       } catch { /* wallet not ready or no prior attestation */ }
     })();
-  }, [connected, address, decrypt]);
+  }, [address, decrypt]);
 
   async function prefillForm(addr: string) {
     setPrefilling(true);

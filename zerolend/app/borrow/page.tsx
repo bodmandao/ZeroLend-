@@ -11,21 +11,21 @@ import { useStore } from '../../lib/store';
 import {
   getTierInfo, randomField, formatAleo, aleoToMicro,
   microToAleo, computeInterest, executeTransaction,
-  PROGRAM_ID, buildTierProof, buildCreditRecord,
-  buildCreditsRecord, TIERS
+  PROGRAM_ID, TIERS, getCurrentBlockHeight,
+  waitForRecordCiphertext,
 } from '../../lib/aleo';
 import { insertLoan } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 export default function BorrowPage() {
-  const { wallet: walletAdapter } = useWallet();
+  const { transactionStatus, decrypt, executeTransaction: executeHandler,connected,address } = useWallet();
   const {
     wallet, creditScore, creditTier, tierProof,
-    creditRecord, setTierProof, addLoan, addTransaction
+    addLoan, addTransaction
   } = useStore();
 
   const [amount, setAmount]         = useState('');
-  const [step, setStep]             = useState<'idle' | 'proving' | 'requesting' | 'done'>('idle');
+  const [step, setStep]             = useState<'idle' | 'requesting' | 'done'>('idle');
   const [activeLoan, setActiveLoan] = useState<any>(null);
 
   const tierInfo  = creditTier ? getTierInfo(creditTier) : null;
@@ -41,74 +41,38 @@ export default function BorrowPage() {
 
   const loanPct = maxLoan > 0 ? Math.min((amtNum / maxLoan) * 100, 100) : 0;
 
-  // ── Generate tier proof ──────────────────────────────────────
-  async function handleProveTier() {
-    if (!creditTier || !wallet.address || !creditScore) {
-      toast.error('No credit record found. Visit the Credit page first.');
-      return;
-    }
-    if (!creditRecord) {
-      toast.error('Credit record not found in store. Re-mint your credit record first.');
-      return;
-    }
-    setStep('proving');
-    try {
-      const pNonce = randomField();
-
-      await executeTransaction({
-        programId:    PROGRAM_ID,
-        functionName: 'prove_tier',
-        inputs: [
-          creditRecord,   // private CreditRecord from store
-          pNonce,
-          '200u32',       // expires_in blocks
-          '100u32',       // current_block live block 
-          '1field',       // org_id
-        ],
-      }, walletAdapter);
-
-      const proofStr = buildTierProof(wallet.address, creditTier, '1field', 300, pNonce);
-      setTierProof(proofStr);
-      toast.success('Tier proof ready!');
-      setStep('idle');
-    } catch (e: any) {
-      toast.error(e.message ?? 'Proof generation failed');
-      setStep('idle');
-    }
-  }
 
   // ── Request loan ─────────────────────────────────────────────
   async function handleRequestLoan() {
-    if (!tierProof || !wallet.address) return;
+       if (!connected || !address) { toast.error('Connect your wallet first'); return; }
+    if (!tierProof){ toast.error('Credit tier proof is required'); return; }
     if (amtNum <= 0 || amtNum > maxLoan) {
       toast.error(`Amount must be between 0.01 and ${maxLoan.toLocaleString()} ALEO`);
       return;
     }
-    if (!wallet.poolCreditsRecord) {
-      toast.error('Pool credits record not available. Contact admin.');
-      return;
-    }
     setStep('requesting');
     try {
-      const loanId    = randomField();
-      const loanNonce = randomField();
-      const currentBlk = 100; // replace with live block in prod
-
+      const loanId     = randomField();
+      const loanNonce  = randomField();
+      const currentBlk = await getCurrentBlockHeight();
+console.log('Requesting loan with:', {  tierProof, amtMicro, currentBlk, loanNonce, loanId });
       const txId = await executeTransaction({
-        programId:    PROGRAM_ID,
-        functionName: 'request_loan',
+        programId:   PROGRAM_ID,
+        functionName:  'request_loan',
         inputs: [
           tierProof,
-          wallet.poolCreditsRecord,   // credits.aleo/credits owned by pool
-          `${amtMicro}u64`,           
+          `${amtMicro}u64`,
           `${currentBlk}u32`,
           loanNonce,
           loanId,
         ],
-      }, walletAdapter);
+      }, executeHandler, transactionStatus);
 
-      // Build local loan record 
-      const loan: any = {
+      // Fetch decrypted LoanRecord from the tx for store
+      const loanCipher = await waitForRecordCiphertext(txId);
+      const loanRecord = loanCipher && decrypt ? await decrypt(loanCipher) : null;
+      console.log('Decrypted loan record:', loanRecord);
+      const loan: any = loanRecord ?? {
         owner:          wallet.address,
         loan_id:        loanId,
         principal:      `${amtMicro}u64`,
@@ -237,22 +201,20 @@ export default function BorrowPage() {
                 </span>
               )}
             </div>
-            <p className="text-xs text-zero-text-dim mb-4 leading-relaxed">
-              A tier proof lets the lending pool verify your creditworthiness
-              without seeing your score, repayment history, or any personal data.
-            </p>
-            {!tierProof && (
-              <button
-                onClick={handleProveTier}
-                disabled={step === 'proving'}
-                className="btn-violet w-full flex items-center justify-center gap-2"
-              >
-                {step === 'proving' ? (
-                  <><div className="zk-loader" style={{ width: 14, height: 14 }} />Generating…</>
-                ) : (
-                  <><Zap size={14} />Generate Tier Proof</>
-                )}
-              </button>
+            {tierProof ? (
+              <p className="text-xs leading-relaxed" style={{ color: '#10b981' }}>
+                Tier proof ready — your creditworthiness is verified. No raw data exposed.
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-zero-text-dim mb-3 leading-relaxed">
+                  Generate your tier proof on the Credit page first. It proves your
+                  creditworthiness to the pool without revealing any personal data.
+                </p>
+                <Link href="/credit" className="btn-violet w-full flex items-center justify-center gap-2 text-sm">
+                  <Zap size={14} />Go to Credit Page
+                </Link>
+              </>
             )}
           </div>
 
