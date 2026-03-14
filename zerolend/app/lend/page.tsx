@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Wallet, TrendingUp, Plus, Minus,
   CheckCircle, Lock, BarChart2, ArrowUpRight
@@ -10,21 +10,41 @@ import { useStore } from '../../lib/store';
 import {
   formatAleo, aleoToMicro, microToAleo, randomField,
   computeInterest, executeTransaction, PROGRAM_ID,
-  buildCreditsRecord, buildLenderDeposit
+  getCurrentBlockHeight, waitForRecordCiphertext, fetchPoolStats,
 } from '../../lib/aleo';
-import { insertDeposit } from '../../lib/supabase';
+import { insertDeposit, getDepositsByAddress } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 // Lenders earn at Tier 3 rate (10% APR)
 const LENDER_RATE_BPS = 1000;
 
 export default function LendPage() {
-  const { wallet: walletAdapter } = useWallet();
-  const { wallet, deposits, addDeposit, poolStats } = useStore();
+  const { transactionStatus, decrypt, requestRecords, executeTransaction: executeHandler, connected, address } = useWallet();
+  const { deposits, addDeposit, poolStats, setPoolStats } = useStore();
 
   const [depositAmt, setDepositAmt] = useState('');
   const [tab, setTab]               = useState<'deposit' | 'withdraw'>('deposit');
   const [step, setStep]             = useState<'idle' | 'processing' | 'done'>('idle');
+
+  // Fetch pool stats on mount
+  useEffect(() => {
+    fetchPoolStats().then(stats => { console.log(stats); if (stats) setPoolStats(stats); });
+  }, []);
+
+  // Load deposits from DB when wallet connects
+  useEffect(() => {
+    if (!connected || !address) return;
+    getDepositsByAddress(address).then(rows => {
+      rows.forEach(dep => addDeposit({
+        owner:            address,
+        deposited_amount: `${dep.amount}u64`,
+        deposit_block:    `${dep.deposit_block}u32`,
+        nonce:            dep.deposit_nonce,
+        tx_id:            dep.tx_id,
+        status:           dep.status,
+      }));
+    });
+  }, [connected, address]);
 
   const amtNum   = parseFloat(depositAmt) || 0;  // ALEO
   const amtMicro = aleoToMicro(amtNum);           // microcredits u64
@@ -40,7 +60,7 @@ export default function LendPage() {
 
   // ── Deposit ──────────────────────────────────────────────────
   async function handleDeposit() {
-    if (!wallet.connected || !wallet.address) {
+    if (!connected || !address) {
       toast.error('Connect your wallet first');
       return;
     }
@@ -48,42 +68,58 @@ export default function LendPage() {
       toast.error('Enter a deposit amount');
       return;
     }
-    if (!wallet.creditsRecord) {
-      toast.error('No credits record found in wallet');
-      return;
-    }
     setStep('processing');
     try {
       const nonce      = randomField();
-      const currentBlk = 100; // replace with live block in prod
+      const currentBlk = await getCurrentBlockHeight();
+
+      // Fetch the user's credits.aleo/credits record and decrypt it
+      const creditRecords = await requestRecords?.('credits.aleo', false);
+      const creditsRec = creditRecords?.find((r: any) => {
+        const isOwner = r.owner === address || r.sender === address;
+        return isOwner && r.recordName === 'credits' && !r.spent;
+      });
+      if (!creditsRec) {
+        toast.error('No credits record found in your wallet');
+        setStep('idle');
+        return;
+      }
+      const decryptedCredits = await decrypt?.((creditsRec as any).recordCiphertext);
+      if (!decryptedCredits) {
+        toast.error('Could not decrypt credits record');
+        setStep('idle');
+        return;
+      }
 
       const txId = await executeTransaction({
         programId:    PROGRAM_ID,
         functionName: 'deposit',
         inputs: [
-          wallet.creditsRecord,   // credits.aleo/credits from user wallet
-          `${amtMicro}u64`,      
+          decryptedCredits,
+          `${amtMicro}u64`,
           `${currentBlk}u32`,
           nonce,
         ],
-      }, walletAdapter);
-
-      const depositRecord: any = {
-        owner:            wallet.address,
-        deposited_amount: `${amtMicro}u64`,
-        deposit_block:    `${currentBlk}u32`,
-        nonce,
-      };
+      }, executeHandler, transactionStatus);
 
       await insertDeposit({
-        lender_address: wallet.address,
+        lender_address: address,
         amount:         amtMicro,
         deposit_block:  currentBlk,
         deposit_nonce:  nonce,
         tx_id:          txId,
       });
 
-      addDeposit(depositRecord);
+      // Add to local state — withdraw will fetch real record from chain via txId
+      addDeposit({
+        owner:            address,
+        deposited_amount: `${amtMicro}u64`,
+        deposit_block:    `${currentBlk}u32`,
+        nonce,
+        tx_id:            txId,
+        status:           'active',
+      });
+      fetchPoolStats()
       toast.success(`Deposited ${formatAleo(amtMicro)} to the pool!`);
       setDepositAmt('');
       setStep('done');
@@ -96,28 +132,27 @@ export default function LendPage() {
 
   // ── Withdraw ─────────────────────────────────────────────────
   async function handleWithdraw(deposit: any) {
-    if (!wallet.address) return;
-    if (!wallet.poolCreditsRecord) {
-      toast.error('Pool credits record not available');
-      return;
-    }
+    if (!address || !deposit.tx_id) return;
     setStep('processing');
     try {
-      // Parse u64 string — strip suffix if present
-      const depAmt     = parseInt(String(deposit.deposited_amount));
-      const depBlock   = parseInt(String(deposit.deposit_block));
-      const currentBlk = 10100; // replace with live block in prod
+      const currentBlk = await getCurrentBlockHeight();
 
-      const txId = await executeTransaction({
-        programId:    PROGRAM_ID,
-        functionName: 'withdraw',
+      // Fetch the real LenderDeposit ciphertext from the deposit tx and decrypt
+      const cipher = await waitForRecordCiphertext(deposit.tx_id);
+      if (!cipher) throw new Error('Could not fetch deposit record from chain');
+      const decryptedDeposit = await decrypt?.(cipher);
+      if (!decryptedDeposit) throw new Error('Could not decrypt deposit record');
+
+      await executeTransaction({
+        programId:   PROGRAM_ID,
+        functionName:  'withdraw',
         inputs: [
-          wallet.poolCreditsRecord,   // pool's credits.aleo/credits record
-          buildLenderDeposit(wallet.address, depAmt, depBlock, deposit.nonce),
+          decryptedDeposit,
           `${currentBlk}u32`,
         ],
-      }, walletAdapter);
+      }, executeHandler, transactionStatus);
 
+      const depAmt = parseInt(String(deposit.deposited_amount)) || deposit.amount || 0;
       toast.success(`Withdrawn ${formatAleo(depAmt)} + yield!`);
       setStep('idle');
     } catch (e: any) {
@@ -254,8 +289,8 @@ export default function LendPage() {
                       <p className="text-xs text-zero-text-dim mb-2">Estimated Returns</p>
                       <div className="space-y-1.5 text-xs">
                         {[
-                          { label: 'Daily yield',   val: (amtNum * (LENDER_RATE_BPS / 100 / 100) / 365).toFixed(6) },
-                          { label: 'Monthly yield', val: (amtNum * (LENDER_RATE_BPS / 100 / 100) / 12).toFixed(4)  },
+                          { label: 'Daily yield',   val: microToAleo(computeInterest(amtMicro, LENDER_RATE_BPS, 8_640)).toFixed(6)  },
+                          { label: 'Monthly yield', val: microToAleo(computeInterest(amtMicro, LENDER_RATE_BPS, 262_800)).toFixed(4) },
                         ].map(({ label, val }) => (
                           <div key={label} className="flex justify-between">
                             <span className="text-zero-text-dim">{label}</span>
@@ -274,7 +309,7 @@ export default function LendPage() {
 
                   <button
                     onClick={handleDeposit}
-                    disabled={!wallet.connected || amtNum <= 0 || step === 'processing'}
+                    disabled={!connected || amtNum <= 0 || step === 'processing'}
                     className="btn-primary w-full flex items-center justify-center gap-2"
                   >
                     {step === 'processing' ? (

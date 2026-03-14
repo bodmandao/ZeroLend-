@@ -51,12 +51,15 @@ export async function markLoanLiquidated(loanIdField: string) {
 }
 
 
-export async function getDepositsByAddress(address: string) {
-  return supabase
+// ── Get all active deposits for a lender ─────────────────────
+export async function getDepositsByAddress(lenderAddress: string) {
+  const { data } = await supabase
     .from('deposits')
     .select('*')
-    .eq('lender_address', address)
+    .eq('lender_address', lenderAddress)
+    .eq('status', 'active')
     .order('created_at', { ascending: false });
+  return data ?? [];
 }
 
 
@@ -246,3 +249,4 @@ export async function getDepositTxId(lenderAddress: string, depositNonce: string
     .single();
   return data?.tx_id ?? null;
 }
+

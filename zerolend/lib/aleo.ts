@@ -35,12 +35,17 @@ export function scoreToTier(score: number): 1 | 2 | 3 | 4 | 5 {
   return 1;
 }
 
+// ~6 blocks/min × 60 × 24 × 365 = 3,153,600 blocks per year (10s block time)
+const BLOCKS_PER_YEAR = 3_153_600;
+
 export function computeInterest(
   principal:  number,  // microcredits
-  rateBps:    number,
+  rateBps:    number,  // e.g. 1000 = 10% APR
   blocksHeld: number
 ): number {
-  return Math.floor((principal * rateBps * blocksHeld) / 10_000_000);
+  // interest = principal × APR × (blocksHeld / blocksPerYear)
+  // APR = rateBps / 10_000
+  return Math.floor((principal * rateBps * blocksHeld) / (10_000 * BLOCKS_PER_YEAR));
 }
 
 // ── Unit helpers ──────────────────────────────────────────────
@@ -323,27 +328,25 @@ export function buildOracleAttestation(
 }
 
 // ── Fetch record ciphertext from a confirmed transaction ───────
-// After executeTransaction returns a txId, call this to extract
-// the record1q... ciphertext from the first record-type output.
-// The caller then passes it to wallet.decrypt() to get plaintext.
+// outputIndex: which record output to grab (default 0 = first record output)
+// deposit() returns (change_credits[0], LenderDeposit[1]) — pass index=1 for LenderDeposit
 export async function fetchRecordCiphertextFromTx(
   txId:        string,
-  recordName?: string,   // optional: verify it's the right record type
+  outputIndex = 0,
 ): Promise<string | null> {
   try {
     const res = await fetch(`${API_URL}/testnet/transaction/${txId}`);
     if (!res.ok) return null;
     const tx = await res.json();
 
-    // Walk execution → transitions → outputs, find first record type
     const transitions: any[] = tx?.execution?.transitions ?? [];
+    let recordCount = 0;
     for (const t of transitions) {
-      // Skip credits.aleo fee transition
       if (t.program === 'credits.aleo') continue;
-
       for (const output of (t.outputs ?? [])) {
         if (output.type === 'record' && typeof output.value === 'string') {
-          return output.value; // record1q...
+          if (recordCount === outputIndex) return output.value;
+          recordCount++;
         }
       }
     }
@@ -354,14 +357,14 @@ export async function fetchRecordCiphertextFromTx(
 }
 
 // ── Poll until a tx is confirmed, then return its record ciphertext ─
-// Useful right after executeTransaction when the tx may not yet be indexed.
 export async function waitForRecordCiphertext(
   txId:          string,
   maxAttempts  = 20,
   intervalMs   = 5_000,
+  outputIndex  = 0,
 ): Promise<string | null> {
   for (let i = 0; i < maxAttempts; i++) {
-    const cipher = await fetchRecordCiphertextFromTx(txId);
+    const cipher = await fetchRecordCiphertextFromTx(txId, outputIndex);
     if (cipher) return cipher;
     await new Promise(r => setTimeout(r, intervalMs));
   }

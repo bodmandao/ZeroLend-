@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Menu, X, Zap, ExternalLink, ChevronDown } from 'lucide-react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
@@ -8,23 +8,102 @@ import { WalletMultiButton } from '@provablehq/aleo-wallet-adaptor-react-ui';
 import { useStore } from '../../lib/store';
 
 export default function Navbar() {
-  const { sidebarOpen, setSidebarOpen, setWallet, disconnectWallet } = useStore();
+  const { setWallet, resetWallet, clearCredit } = useStore();
   const { address, connected, disconnect } = useWallet();
   const [dropdownOpen, setDropdownOpen] = useState(false);
-
+    const [sidebarOpen, setSidebarOpen]   = useState(false);
   const shortAddress = address
+  
     ? `${address.slice(0, 10)}...${address.slice(-6)}`
     : '';
 
+  // Sync wallet connection state — clears credit data on any disconnect
+  useEffect(() => {
+    if (!connected || !address) {
+      resetWallet();
+      clearCredit();
+    } else {
+      setWallet({ connected: true, address, publicKey : address });
+    }
+  }, [connected, address]);
+
   function handleDisconnect() {
     disconnect();
-    disconnectWallet();
+    resetWallet();
+    clearCredit();
     setDropdownOpen(false);
   }
 
   return (
     <>
-    
+      {/* Wallet adapter button styles — scoped override */}
+      <style>{`
+        .wallet-adapter-button {
+          font-family: 'Syne', sans-serif !important;
+          font-size: 13px !important;
+          font-weight: 600 !important;
+          letter-spacing: 0.05em !important;
+          padding: 10px 20px !important;
+          border-radius: 12px !important;
+          border: 1px solid rgba(0, 212, 255, 0.4) !important;
+          background: linear-gradient(135deg, rgba(0,212,255,0.18), rgba(0,255,204,0.08)) !important;
+          color: #00d4ff !important;
+          transition: all 0.2s ease !important;
+          height: auto !important;
+          line-height: 1 !important;
+        }
+        .wallet-adapter-button:hover:not(:disabled) {
+          box-shadow: 0 0 20px rgba(0, 212, 255, 0.25) !important;
+          transform: translateY(-1px) !important;
+          border-color: rgba(0, 212, 255, 0.6) !important;
+          background: linear-gradient(135deg, rgba(0,212,255,0.25), rgba(0,255,204,0.12)) !important;
+        }
+        .wallet-adapter-button:disabled {
+          opacity: 0.4 !important;
+          cursor: not-allowed !important;
+          transform: none !important;
+        }
+        .wallet-adapter-button-trigger {
+          background: linear-gradient(135deg, rgba(0,212,255,0.18), rgba(0,255,204,0.08)) !important;
+        }
+        /* Dropdown modal */
+        .wallet-adapter-modal-wrapper {
+          background: #0c1424 !important;
+          border: 1px solid #1a2540 !important;
+          border-radius: 20px !important;
+          box-shadow: 0 24px 80px rgba(0,0,0,0.7) !important;
+        }
+        .wallet-adapter-modal-title {
+          font-family: 'Syne', sans-serif !important;
+          color: #c8d6f0 !important;
+        }
+        .wallet-adapter-modal-list li button {
+          border-radius: 12px !important;
+          transition: all 0.2s ease !important;
+          color: #c8d6f0 !important;
+        }
+        .wallet-adapter-modal-list li button:hover {
+          background: rgba(0, 212, 255, 0.08) !important;
+        }
+        .wallet-adapter-modal-list-more {
+          color: #00d4ff !important;
+        }
+        .wallet-adapter-collapse-ul {
+          background: transparent !important;
+        }
+        .wallet-adapter-modal-middle-button {
+          background: linear-gradient(135deg, rgba(0,212,255,0.2), rgba(0,255,204,0.1)) !important;
+          border: 1px solid rgba(0,212,255,0.3) !important;
+          border-radius: 12px !important;
+          font-family: 'Syne', sans-serif !important;
+          color: #00d4ff !important;
+        }
+        .wallet-adapter-modal-overlay {
+          background: rgba(4, 6, 15, 0.85) !important;
+          backdrop-filter: blur(6px) !important;
+        }
+      `}</style>
+
       <nav className="sticky top-0 z-40 glass border-b border-zero-border/50">
         <div className="flex items-center justify-between h-16 px-6">
 

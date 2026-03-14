@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   TrendingUp, Shield, AlertTriangle, CheckCircle,
-  ChevronRight, Zap, Clock, DollarSign, Lock
+  ChevronRight, Zap, Clock, DollarSign, Lock, RefreshCw
 } from 'lucide-react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { useStore } from '../../lib/store';
@@ -12,24 +12,37 @@ import {
   getTierInfo, randomField, formatAleo, aleoToMicro,
   microToAleo, computeInterest, executeTransaction,
   PROGRAM_ID, TIERS, getCurrentBlockHeight,
-  waitForRecordCiphertext,
+  waitForRecordCiphertext, fetchPoolStats,
 } from '../../lib/aleo';
 import { insertLoan } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 export default function BorrowPage() {
-  const { transactionStatus, decrypt, executeTransaction: executeHandler,connected,address } = useWallet();
+  const { transactionStatus, decrypt, requestRecords, connected, address, executeTransaction: executeHandler } = useWallet();
   const {
     wallet, creditScore, creditTier, tierProof,
-    addLoan, addTransaction
+    addLoan, addTransaction, poolStats, setPoolStats,
   } = useStore();
 
   const [amount, setAmount]         = useState('');
   const [step, setStep]             = useState<'idle' | 'requesting' | 'done'>('idle');
   const [activeLoan, setActiveLoan] = useState<any>(null);
 
-  const tierInfo  = creditTier ? getTierInfo(creditTier) : null;
-  const maxLoan   = tierInfo?.maxLoan ?? 0;            // in ALEO
+  // Fetch pool stats when connected so we can cap borrow amount
+  useEffect(() => {
+    if (!connected) return;
+    fetchPoolStats().then(stats => { if (stats) setPoolStats(stats); });
+  }, [connected]);
+
+  const tierInfo       = creditTier ? getTierInfo(creditTier) : null;
+  const tierMaxLoan    = tierInfo?.maxLoan ?? 0;   // tier-based limit in ALEO
+  const poolAvailable  = poolStats
+    ? microToAleo(Math.max(0, poolStats.totalLiquidity - poolStats.totalBorrowed))
+    : null;
+  // Effective max = min(tier limit, available pool liquidity)
+  const maxLoan        = poolAvailable !== null
+    ? Math.min(tierMaxLoan, poolAvailable)
+    : tierMaxLoan;
   const rate      = tierInfo ? TIERS[creditTier as keyof typeof TIERS].rate : 0;
   const amtNum    = parseFloat(amount) || 0;           // in ALEO
   const amtMicro  = aleoToMicro(amtNum);               // microcredits u64
@@ -44,8 +57,7 @@ export default function BorrowPage() {
 
   // ── Request loan ─────────────────────────────────────────────
   async function handleRequestLoan() {
-       if (!connected || !address) { toast.error('Connect your wallet first'); return; }
-    if (!tierProof){ toast.error('Credit tier proof is required'); return; }
+    if (!tierProof || !address) return;
     if (amtNum <= 0 || amtNum > maxLoan) {
       toast.error(`Amount must be between 0.01 and ${maxLoan.toLocaleString()} ALEO`);
       return;
@@ -55,7 +67,7 @@ export default function BorrowPage() {
       const loanId     = randomField();
       const loanNonce  = randomField();
       const currentBlk = await getCurrentBlockHeight();
-console.log('Requesting loan with:', {  tierProof, amtMicro, currentBlk, loanNonce, loanId });
+
       const txId = await executeTransaction({
         programId:   PROGRAM_ID,
         functionName:  'request_loan',
@@ -68,12 +80,12 @@ console.log('Requesting loan with:', {  tierProof, amtMicro, currentBlk, loanNon
         ],
       }, executeHandler, transactionStatus);
 
+      // Build local loan record (no token_id, u64 principal)
       // Fetch decrypted LoanRecord from the tx for store
       const loanCipher = await waitForRecordCiphertext(txId);
       const loanRecord = loanCipher && decrypt ? await decrypt(loanCipher) : null;
-      console.log('Decrypted loan record:', loanRecord);
       const loan: any = loanRecord ?? {
-        owner:          wallet.address,
+        owner:          address,
         loan_id:        loanId,
         principal:      `${amtMicro}u64`,
         interest_rate:  `${rateBps}u64`,
@@ -84,7 +96,7 @@ console.log('Requesting loan with:', {  tierProof, amtMicro, currentBlk, loanNon
       };
 
       await insertLoan({
-        borrower_address: wallet.address,
+        borrower_address: address,
         loan_id_field:    loanId,
         principal:        amtMicro,
         interest_rate:    rateBps,
@@ -113,7 +125,22 @@ console.log('Requesting loan with:', {  tierProof, amtMicro, currentBlk, loanNon
     }
   }
 
-  // ── No credit score guard ────────────────────────────────────
+  // ── No credit / not connected guard ─────────────────────────
+  if (!connected || !address) {
+    return (
+      <div className="p-6 max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[60vh] text-center">
+        <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
+          style={{ background: 'rgba(0,212,255,0.1)', border: '1px solid rgba(0,212,255,0.2)' }}>
+          <Shield size={28} className="text-zero-cyan" />
+        </div>
+        <h2 className="text-2xl font-bold text-zero-text mb-2" style={{ fontFamily: "'Syne', sans-serif" }}>
+          Connect Your Wallet
+        </h2>
+        <p className="text-zero-text-dim mb-6">Connect your wallet to access borrowing.</p>
+      </div>
+    );
+  }
+
   if (!creditScore || !creditTier) {
     return (
       <div className="p-6 max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[60vh] text-center">
@@ -276,7 +303,18 @@ console.log('Requesting loan with:', {  tierProof, amtMicro, currentBlk, loanNon
               <div className="flex items-center gap-2 text-xs text-zero-red mb-3 p-2 rounded-lg"
                 style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
                 <AlertTriangle size={12} />
-                Exceeds your tier limit of {maxLoan.toLocaleString()} ALEO
+                {poolAvailable !== null && amtNum > poolAvailable
+                  ? `Exceeds available pool liquidity (${poolAvailable.toLocaleString()} ALEO)`
+                  : `Exceeds your tier limit of ${tierMaxLoan.toLocaleString()} ALEO`
+                }
+              </div>
+            )}
+
+            {poolAvailable !== null && poolAvailable === 0 && (
+              <div className="flex items-center gap-2 text-xs text-yellow-400 mb-3 p-2 rounded-lg"
+                style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.2)' }}>
+                <AlertTriangle size={12} />
+                Pool is currently empty — no funds available to borrow
               </div>
             )}
 
@@ -317,8 +355,18 @@ console.log('Requesting loan with:', {  tierProof, amtMicro, currentBlk, loanNon
                 <span className="text-zero-text font-mono">{creditScore}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-zero-text-dim">Max Loan</span>
-                <span className="text-zero-text">{maxLoan.toLocaleString()} ALEO</span>
+                <span className="text-zero-text-dim">Tier Max Loan</span>
+                <span className="text-zero-text">{tierMaxLoan.toLocaleString()} ALEO</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zero-text-dim">Pool Available</span>
+                <span className={`font-mono ${poolAvailable !== null && poolAvailable < tierMaxLoan ? 'text-yellow-400' : 'text-zero-text'}`}>
+                  {poolAvailable !== null ? `${poolAvailable.toLocaleString()} ALEO` : '—'}
+                </span>
+              </div>
+              <div className="flex justify-between border-t border-zero-border/30 pt-2">
+                <span className="text-zero-text-dim font-semibold">Your Max</span>
+                <span className="text-zero-cyan font-bold font-mono">{maxLoan.toLocaleString()} ALEO</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-zero-text-dim">Interest Rate</span>
