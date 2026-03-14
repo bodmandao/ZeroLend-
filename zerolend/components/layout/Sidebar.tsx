@@ -8,18 +8,21 @@ import {
 } from 'lucide-react';
 import { useStore } from '../../lib/store';
 import clsx from 'clsx';
+import { useState } from 'react';
 
 const NAV = [
   { href: '/',          icon: LayoutDashboard, label: 'Dashboard',  desc: 'Overview & stats'     },
   { href: '/borrow',    icon: TrendingUp,       label: 'Borrow',     desc: 'Request a loan'       },
   { href: '/lend',      icon: Wallet,           label: 'Lend',       desc: 'Earn yield'           },
   { href: '/credit',    icon: ShieldCheck,      label: 'Credit',     desc: 'Your ZK credit score' },
-  { href: '/admin',     icon: Settings,         label: 'Admin',      desc: 'Oracle & pool setup'  },
+  // { href: '/admin',     icon: Settings,         label: 'Admin',      desc: 'Oracle & pool setup'  },
 ];
 
 export default function Sidebar() {
   const pathname    = usePathname();
-  const { sidebarOpen, setSidebarOpen, creditTier, creditScore } = useStore();
+      const [sidebarOpen, setSidebarOpen]   = useState(false);
+  
+  const {  creditTier, creditScore } = useStore();
 
   return (
     <>
