@@ -10,19 +10,17 @@ import { useStore } from '../../lib/store';
 import {
   computeCreditScore, scoreToTier, getTierInfo,
   randomField, executeTransaction, PROGRAM_ID,
-  buildOracleAttestation, aleoToMicro, microToAleo,
-  getCurrentBlockHeight
+  aleoToMicro, microToAleo,
+  getCurrentBlockHeight,
+  waitForRecordCiphertext,
 } from '../../lib/aleo';
 import {
   insertAttestation, markAttestationRedeemed,
-  getUserLoanHistory
+  getUserLoanHistory, saveAttestationTxId, getAttestationTxId,
 } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
-// ── Wallet age helper ─────────────────────────────────────────
 const PROVABLE_API = 'https://api.provable.com/v2';
-
-// Poll oracle server directly — avoids Next.js/Codespace proxy timeouts on GET
 
 async function fetchWalletAgeDays(address: string): Promise<number> {
   try {
@@ -58,7 +56,7 @@ async function fetchWalletAgeDays(address: string): Promise<number> {
 }
 
 export default function CreditPage() {
-  const { transactionStatus, requestRecords, decrypt, connected, address, executeTransaction: executeHandler } = useWallet();
+  const { transactionStatus, decrypt, connected, address, executeTransaction: executeHandler } = useWallet();
   const {
     wallet, creditScore, creditTier, creditRecord,
     setCreditRecord, setTierProof
@@ -72,7 +70,8 @@ export default function CreditPage() {
   });
 
   const [prefilling, setPrefilling]       = useState(false);
-  const [prefillDone, setPrefillDone]     = useState(false);
+  // prefillDone is local — never persisted. Always re-runs on wallet connect.
+  const [prefillDone, setPrefillDone] = useState(false);
   const [prefillSource, setPrefillSource] = useState<Record<string, 'chain' | 'supabase' | 'new'>>({});
   const [step, setStep]                   = useState<'idle' | 'attesting' | 'proving' | 'done'>('idle');
   const [showRawData, setShowRawData]     = useState(false);
@@ -81,29 +80,31 @@ export default function CreditPage() {
 
   // ── Auto-prefill when wallet connects ────────────────────────
   useEffect(() => {
-    if (!connected || !address || prefillDone) return;
+    if (!connected || !address) return;
+    // Reset prefill state on every wallet connect so it always re-runs
+    setPrefillDone(false);
+    setForm({ walletAgeDays: '', repaymentsMade: '', defaults: '', totalVolume: '' });
     prefillForm(address);
   }, [connected, address]);
 
-  // Auto-detect existing CreditRecord in wallet — skip Step 1 for returning users
+  // Auto-detect existing CreditRecord — look up saved txId from DB, fetch ciphertext from API
   useEffect(() => {
-    if (!connected || !requestRecords || !decrypt || creditScore !== null) return;
+    if (!connected || !address || !decrypt || creditScore !== null) return;
     (async () => {
       try {
-        const records = await requestRecords(PROGRAM_ID, false);
-        const existing = records?.find((r: any) => {
-          const isOwner  = r.owner === address || r.sender === address;
-          return isOwner && r.recordName === 'CreditRecord' && !r.spent;
-        });
-        if (!existing) return;
-        const decrypted = await decrypt((existing as any).recordCiphertext);
+        const txId = await getAttestationTxId(address);
+        if (!txId) return;
+        const cipher = await waitForRecordCiphertext(txId, 3, 2_000); // quick check, 3 attempts
+        if (!cipher) return;
+        const decrypted = await decrypt(cipher);
+        console.log('Decrypted existing record:', decrypted);
         if (!decrypted) return;
-        const parseField = (str: string, key: string) =>
-          str.match(new RegExp(`${key}:\\s*([^,}]+)`))?.[1]?.trim() ?? '';
+        const parseField = (s: string, k: string) =>
+          s.match(new RegExp(`${k}:\\s*([^,}]+)`))?.[1]?.trim() ?? '';
         const score = parseInt(parseField(decrypted, 'current_score')) || 0;
         const tier  = scoreToTier(score);
         setCreditRecord({
-          owner:           address!,
+          owner:           address,
           wallet_age_days: parseField(decrypted, 'wallet_age_days'),
           repayments_made: parseField(decrypted, 'repayments_made'),
           defaults:        parseField(decrypted, 'defaults'),
@@ -113,10 +114,10 @@ export default function CreditPage() {
           nonce:           parseField(decrypted, 'nonce'),
         }, score, tier);
         setStep('done');
-        toast('Existing credit record found in your wallet.', { icon: '✅' });
-      } catch { /* wallet not ready yet */ }
+        toast('Existing credit record found.', { icon: '✅' });
+      } catch { /* wallet not ready or no prior attestation */ }
     })();
-  }, [connected, requestRecords, decrypt]);
+  }, [connected, address, decrypt]);
 
   async function prefillForm(addr: string) {
     setPrefilling(true);
@@ -171,18 +172,14 @@ export default function CreditPage() {
   const tierInfo    = creditTier ? getTierInfo(creditTier) : null;
 
   // ── Step 1: Oracle Attestation ────────────────────────────────
-  // Fetch, validate, and decrypt the unspent CreditRecord from the user's wallet
+  // Fetch and decrypt CreditRecord using the saved txId from DB
   async function fetchCreditRecord(): Promise<string | null> {
-    const records = await requestRecords?.(PROGRAM_ID, true);
-    console.log('Fetched wallet records for credit record lookup:', records);
-    const rec = records?.find((r: any) => {
-      const isOwner  = r.owner === address || r.sender === address;
-      const isRecord = r.recordName === 'CreditRecord';
-      return isOwner && isRecord && !r.spent;
-    });
-    if (!rec) return null;
-    const decrypted = await decrypt?.((rec as any).recordCiphertext);
-    return decrypted ?? null;
+    if (!address || !decrypt) return null;
+    const txId = await getAttestationTxId(address);
+    if (!txId) return null;
+    const cipher = await waitForRecordCiphertext(txId);
+    if (!cipher) return null;
+    return await decrypt(cipher) ?? null;
   }
 
   // ── Step 1: Attest — user wallet calls attest_credit directly ─
@@ -190,6 +187,7 @@ export default function CreditPage() {
   // User wallet proves the ZK circuit and the CreditRecord lands in their wallet.
   async function handleAttest() {
     if (!connected || !address) { toast.error('Connect your wallet first'); return; }
+    if (step === 'proving') return; // don't interrupt an in-progress prove
     setStep('attesting');
     try {
       const age  = parseInt(form.walletAgeDays)  || 0;
@@ -200,7 +198,7 @@ export default function CreditPage() {
       if (!currentBlock) { toast.error('Could not fetch block height'); setStep('idle'); return; }
       const nonce = randomField();
 
-      await executeTransaction({
+      const txId = await executeTransaction({
         programId:    PROGRAM_ID,
         functionName: 'attest_credit',
         inputs: [
@@ -216,6 +214,7 @@ export default function CreditPage() {
       const computedScore = computeCreditScore(age, reps, defs, vol);
       const tier          = scoreToTier(computedScore);
 
+      // Save attestation + txId to DB for future record lookups
       await insertAttestation({
         user_address:    address,
         attestation_id:  nonce,
@@ -225,26 +224,32 @@ export default function CreditPage() {
         total_volume:    vol,
         computed_score:  computedScore,
         tier,
+        tx_id:           txId,
       });
 
-      // Fetch the real decrypted record from wallet — has actual VM _nonce
-      const decryptedRec = await fetchCreditRecord();
-      if (decryptedRec) {
-        // Parse fields from decrypted record string for Zustand store
-        const parseField = (str: string, key: string) =>
-          str.match(new RegExp(`${key}:\\s*([^,}]+)`))?.[1]?.trim() ?? '';
-        setCreditRecord({
-          owner:           address,
-          wallet_age_days: parseField(decryptedRec, 'wallet_age_days'),
-          repayments_made: parseField(decryptedRec, 'repayments_made'),
-          defaults:        parseField(decryptedRec, 'defaults'),
-          total_volume:    parseField(decryptedRec, 'total_volume'),
-          current_score:   parseField(decryptedRec, 'current_score'),
-          last_updated:    parseField(decryptedRec, 'last_updated'),
-          nonce:           parseField(decryptedRec, 'nonce'),
-        }, computedScore, tier);
+      // Fetch record ciphertext from the confirmed tx, then decrypt
+      toast('Fetching your credit record…', { id: 'fetch-record', duration: Infinity });
+      const cipher    = await waitForRecordCiphertext(txId);
+      toast.dismiss('fetch-record');
+
+      if (cipher && decrypt) {
+        const decrypted = await decrypt(cipher);
+        if (decrypted) {
+          const parseField = (s: string, k: string) =>
+            s.match(new RegExp(`${k}:\\s*([^,}]+)`))?.[1]?.trim() ?? '';
+          setCreditRecord({
+            owner:           address,
+            wallet_age_days: parseField(decrypted, 'wallet_age_days'),
+            repayments_made: parseField(decrypted, 'repayments_made'),
+            defaults:        parseField(decrypted, 'defaults'),
+            total_volume:    parseField(decrypted, 'total_volume'),
+            current_score:   parseField(decrypted, 'current_score'),
+            last_updated:    parseField(decrypted, 'last_updated'),
+            nonce:           parseField(decrypted, 'nonce'),
+          }, computedScore, tier);
+        }
       } else {
-        // Fallback if wallet indexing is slow — prove_tier will re-fetch
+        // Fallback — prove_tier will re-fetch from DB anyway
         setCreditRecord({
           owner: address, wallet_age_days: `${age}u32`, repayments_made: `${reps}u32`,
           defaults: `${defs}u32`, total_volume: `${vol}u64`,
@@ -486,7 +491,7 @@ export default function CreditPage() {
 
           <button
             onClick={handleAttest}
-            disabled={step === 'attesting' || prefilling || !connected || form.walletAgeDays === ''}
+            disabled={step === 'attesting' || prefilling || !connected}
             className="btn-primary w-full mt-4 flex items-center justify-center gap-2"
           >
             {step === 'attesting' ? (

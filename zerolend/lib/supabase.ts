@@ -26,20 +26,7 @@ export async function upsertPoolSnapshot(stats: {
   return supabase.from('pool_snapshots').insert(stats);
 }
 
-// ── Loan tracking ─────────────────────────────────────────────
 
-export async function insertLoan(loan: {
-  borrower_address: string;
-  loan_id_field: string;
-  principal: number;
-  interest_rate: number;
-  tier: number;
-  borrowed_at: string;
-  due_at_block: number;
-  tx_id: string;
-}) {
-  return supabase.from('loans').insert({ ...loan, status: 'active' });
-}
 
 export async function getLoansByAddress(address: string) {
   return supabase
@@ -63,17 +50,6 @@ export async function markLoanLiquidated(loanIdField: string) {
     .eq('loan_id_field', loanIdField);
 }
 
-// ── Deposit tracking ──────────────────────────────────────────
-
-export async function insertDeposit(deposit: {
-  lender_address: string;
-  amount: number;
-  deposit_block: number;
-  deposit_nonce: string;
-  tx_id: string;
-}) {
-  return supabase.from('deposits').insert({ ...deposit, status: 'active' });
-}
 
 export async function getDepositsByAddress(address: string) {
   return supabase
@@ -83,20 +59,6 @@ export async function getDepositsByAddress(address: string) {
     .order('created_at', { ascending: false });
 }
 
-// ── Credit attestations ───────────────────────────────────────
-
-export async function insertAttestation(att: {
-  user_address: string;
-  attestation_id: string;
-  wallet_age_days: number;
-  repayments_made: number;
-  defaults: number;
-  total_volume: number;
-  computed_score: number;
-  tier: number;
-}) {
-  return supabase.from('credit_attestations').insert({ ...att, redeemed: false });
-}
 
 export async function getPendingAttestation(address: string) {
   return supabase
@@ -107,13 +69,6 @@ export async function getPendingAttestation(address: string) {
     .order('created_at', { ascending: false })
     .limit(1)
     .single();
-}
-
-export async function markAttestationRedeemed(attestationId: string) {
-  return supabase
-    .from('credit_attestations')
-    .update({ redeemed: true })
-    .eq('attestation_id', attestationId);
 }
 
 export async function getLatestCreditRecord(address: string) {
@@ -148,7 +103,6 @@ export async function getTransactionHistory(address: string) {
     .limit(20);
 }
 
-
 // ── Get existing unredeemed attestation for a wallet ──────────
 export async function getExistingAttestation(address: string) {
   const { data } = await supabase
@@ -177,4 +131,118 @@ export async function getUserLoanHistory(address: string) {
       .filter(l => l.status === 'repaid')
       .reduce((sum, l) => sum + (l.principal ?? 0), 0),
   };
+}
+
+// ── Insert attestation record ─────────────────────────────────
+export async function insertAttestation(params: {
+  user_address:    string;
+  attestation_id:  string;
+  wallet_age_days: number;
+  repayments_made: number;
+  defaults:        number;
+  total_volume:    number;
+  computed_score:  number;
+  tier:            number;
+  tx_id?:          string;
+  oracle_address?: string;
+  valid_until?:    number;
+}) {
+  const { error } = await supabase.from('credit_attestations').upsert({
+    user_address:    params.user_address,
+    attestation_id:  params.attestation_id,
+    wallet_age_days: params.wallet_age_days,
+    repayments_made: params.repayments_made,
+    defaults:        params.defaults,
+    total_volume:    params.total_volume,
+    computed_score:  params.computed_score,
+    tier:            params.tier,
+    tx_id:           params.tx_id ?? null,
+    oracle_address:  params.oracle_address ?? null,
+    valid_until:     params.valid_until ?? null,
+    redeemed:        false,
+  }, { onConflict: 'user_address' });
+  if (error) console.error('[supabase] insertAttestation:', error.message);
+}
+
+// ── Save tx_id after attest_credit ───────────────────────────
+export async function saveAttestationTxId(userAddress: string, txId: string) {
+  const { error } = await supabase
+    .from('credit_attestations')
+    .update({ tx_id: txId })
+    .eq('user_address', userAddress);
+  if (error) console.error('[supabase] saveAttestationTxId:', error.message);
+}
+
+// ── Get tx_id for latest attestation ─────────────────────────
+export async function getAttestationTxId(userAddress: string): Promise<string | null> {
+  const { data } = await supabase
+    .from('credit_attestations')
+    .select('tx_id')
+    .eq('user_address', userAddress)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+  return data?.tx_id ?? null;
+}
+
+// ── Mark attestation as redeemed ──────────────────────────────
+export async function markAttestationRedeemed(attestationId: string) {
+  const { error } = await supabase
+    .from('credit_attestations')
+    .update({ redeemed: true })
+    .eq('attestation_id', attestationId);
+  if (error) console.error('[supabase] markAttestationRedeemed:', error.message);
+}
+
+// ── Insert loan record ────────────────────────────────────────
+export async function insertLoan(params: {
+  borrower_address: string;
+  loan_id_field:    string;
+  principal:        number;
+  interest_rate:    number;
+  tier:             number;
+  borrowed_at:      string;
+  due_at_block:     number;
+  tx_id:            string;
+}) {
+  const { error } = await supabase.from('loans').insert({
+    ...params,
+    status: 'active',
+  });
+  if (error) console.error('[supabase] insertLoan:', error.message);
+}
+
+// ── Save tx_id on a loan for record lookup ────────────────────
+export async function saveLoanTxId(loanIdField: string, txId: string) {
+  const { error } = await supabase
+    .from('loans')
+    .update({ tx_id: txId })
+    .eq('loan_id_field', loanIdField);
+  if (error) console.error('[supabase] saveLoanTxId:', error.message);
+}
+
+// ── Insert deposit record ─────────────────────────────────────
+export async function insertDeposit(params: {
+  lender_address: string;
+  amount:         number;
+  deposit_block:  number;
+  deposit_nonce:  string;
+  tx_id:          string;
+}) {
+  const { error } = await supabase.from('deposits').insert({
+    ...params,
+    status: 'active',
+  });
+  if (error) console.error('[supabase] insertDeposit:', error.message);
+}
+
+// ── Get deposit tx_id for withdrawal ─────────────────────────
+export async function getDepositTxId(lenderAddress: string, depositNonce: string): Promise<string | null> {
+  const { data } = await supabase
+    .from('deposits')
+    .select('tx_id')
+    .eq('lender_address', lenderAddress)
+    .eq('deposit_nonce', depositNonce)
+    .single();
+  return data?.tx_id ?? null;
 }

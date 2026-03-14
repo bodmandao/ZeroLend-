@@ -125,11 +125,14 @@ export async function executeTransaction(
 
   console.log('[execute]', programId, functionName, inputs);
 
+  // NOTE: wallet adapter uses `fee` in microcredits (not `priorityFee` in ALEO).
+  // The official SDK's ProgramManager uses `priorityFee` in ALEO — that's only
+  // used server-side in the oracle API route. These are two different APIs.
   const raw = await executeHandler({
     program:     programId,
     function:    functionName,
     inputs,
-    fee,
+    fee,          // microcredits — wallet adapter field name
     privateFee,
   });
 
@@ -317,4 +320,50 @@ export function buildOracleAttestation(
     `valid_until: ${validUntil}u32`,
     `attestation_id: ${attestationId}}`,
   ].join(', ');
+}
+
+// ── Fetch record ciphertext from a confirmed transaction ───────
+// After executeTransaction returns a txId, call this to extract
+// the record1q... ciphertext from the first record-type output.
+// The caller then passes it to wallet.decrypt() to get plaintext.
+export async function fetchRecordCiphertextFromTx(
+  txId:        string,
+  recordName?: string,   // optional: verify it's the right record type
+): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_URL}/testnet/transaction/${txId}`);
+    if (!res.ok) return null;
+    const tx = await res.json();
+
+    // Walk execution → transitions → outputs, find first record type
+    const transitions: any[] = tx?.execution?.transitions ?? [];
+    for (const t of transitions) {
+      // Skip credits.aleo fee transition
+      if (t.program === 'credits.aleo') continue;
+
+      for (const output of (t.outputs ?? [])) {
+        if (output.type === 'record' && typeof output.value === 'string') {
+          return output.value; // record1q...
+        }
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Poll until a tx is confirmed, then return its record ciphertext ─
+// Useful right after executeTransaction when the tx may not yet be indexed.
+export async function waitForRecordCiphertext(
+  txId:          string,
+  maxAttempts  = 20,
+  intervalMs   = 5_000,
+): Promise<string | null> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const cipher = await fetchRecordCiphertextFromTx(txId);
+    if (cipher) return cipher;
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return null;
 }
