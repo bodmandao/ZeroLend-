@@ -17,6 +17,7 @@ import {
 import {
   insertAttestation, markAttestationRedeemed,
   getUserLoanHistory, saveAttestationTxId, getAttestationTxId,
+  getExistingAttestation, markTierProofGenerated,
 } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
@@ -58,7 +59,7 @@ async function fetchWalletAgeDays(address: string): Promise<number> {
 export default function CreditPage() {
   const { transactionStatus, decrypt, connected, address, executeTransaction: executeHandler } = useWallet();
   const {
-    wallet, creditScore, creditTier, creditRecord,
+    wallet, creditScore, creditTier, creditRecord, tierProof,
     setCreditRecord, setTierProof, clearCredit
   } = useStore();
 
@@ -73,10 +74,13 @@ export default function CreditPage() {
   // prefillDone is local — never persisted. Always re-runs on wallet connect.
   const [prefillDone, setPrefillDone] = useState(false);
   const [prefillSource, setPrefillSource] = useState<Record<string, 'chain' | 'supabase' | 'new'>>({});
-  const [step, setStep]                   = useState<'idle' | 'attesting' | 'proving' | 'done'>('idle');
+  const [step, setStep] = useState<'idle' | 'attesting' | 'proving' | 'done'>(
+    creditRecord ? 'done' : 'idle'
+  );
   const [showRawData, setShowRawData]     = useState(false);
   const [attestation, setAttestation]     = useState<any>(null);
   const [proofExpiry, setProofExpiry]     = useState('200');
+  const [dbTierProof, setDbTierProof]     = useState(false); 
 
   // ── Clear all state when wallet disconnects or changes ───────
   useEffect(() => {
@@ -100,36 +104,33 @@ export default function CreditPage() {
     prefillForm(address);
   }, [address]); // address change covers both new connect and wallet switch
 
-  // Auto-detect existing CreditRecord — look up saved txId from DB, fetch ciphertext from API
   useEffect(() => {
-    if (!connected || !address || !decrypt) return;
+    if (!connected || !address) return;
     (async () => {
       try {
-        const txId = await getAttestationTxId(address);
-        if (!txId) return;
-        const cipher = await waitForRecordCiphertext(txId, 3, 2_000); // quick check, 3 attempts
-        if (!cipher) return;
-        const decrypted = await decrypt(cipher);
-        if (!decrypted) return;
-        const parseField = (s: string, k: string) =>
-          s.match(new RegExp(`${k}:\\s*([^,}]+)`))?.[1]?.trim() ?? '';
-        const score = parseInt(parseField(decrypted, 'current_score')) || 0;
+        const att = await getExistingAttestation(address);
+        if (!att) return;
+        const score = att.computed_score ?? 0;
         const tier  = scoreToTier(score);
         setCreditRecord({
           owner:           address,
-          wallet_age_days: parseField(decrypted, 'wallet_age_days'),
-          repayments_made: parseField(decrypted, 'repayments_made'),
-          defaults:        parseField(decrypted, 'defaults'),
-          total_volume:    parseField(decrypted, 'total_volume'),
-          current_score:   parseField(decrypted, 'current_score'),
-          last_updated:    parseField(decrypted, 'last_updated'),
-          nonce:           parseField(decrypted, 'nonce'),
+          wallet_age_days: String(att.wallet_age_days),
+          repayments_made: String(att.repayments_made),
+          defaults:        String(att.defaults),
+          total_volume:    String(att.total_volume),
+          current_score:   String(score),
+          last_updated:    '0',
+          nonce:           att.attestation_id,
         }, score, tier);
+        // Also restore tier proof status from DB
+        if (att.tier_proof_generated) {
+          setDbTierProof(true);
+          setTierProof(att.prove_tier_tx_id ?? 'generated'); // restore to Zustand too
+        }
         setStep('done');
-        toast('Existing credit record found.', { icon: '✅' });
-      } catch { /* wallet not ready or no prior attestation */ }
+      } catch { /* DB unavailable */ }
     })();
-  }, [address, decrypt]);
+  }, [address]);
 
   async function prefillForm(addr: string) {
     setPrefilling(true);
@@ -194,9 +195,6 @@ export default function CreditPage() {
     return await decrypt(cipher) ?? null;
   }
 
-  // ── Step 1: Attest — user wallet calls attest_credit directly ─
-  // Data is pre-filled from chain/DB. Inputs are read-only.
-  // User wallet proves the ZK circuit and the CreditRecord lands in their wallet.
   async function handleAttest() {
     if (!connected || !address) { toast.error('Connect your wallet first'); return; }
     if (step === 'proving') return; // don't interrupt an in-progress prove
@@ -293,7 +291,7 @@ export default function CreditPage() {
         return;
       }
 
-      await executeTransaction({
+      const txId = await executeTransaction({
         programId:    PROGRAM_ID,
         functionName: 'prove_tier',
         inputs:       [decryptedRec, pNonce, `${expiry}u32`, `${currentBlock}u32`, '1field'],
@@ -301,6 +299,8 @@ export default function CreditPage() {
 
       const proofStr = `{owner: ${address}, tier: ${creditTier}u8, org_id: 1field, expires_at: ${currentBlock + expiry}u32, nonce: ${pNonce}}`;
       setTierProof(proofStr);
+      setDbTierProof(true);
+      await markTierProofGenerated(address, txId);
       toast.success('Tier proof generated! Ready to borrow.');
       setStep('done');
     } catch (e: any) {
@@ -554,11 +554,13 @@ export default function CreditPage() {
 
             <button
               onClick={handleProveTier}
-              disabled={creditScore === null || step === 'proving'}
+              disabled={creditScore === null || step === 'proving' || dbTierProof}
               className="btn-violet w-full flex items-center justify-center gap-2"
             >
               {step === 'proving' ? (
                 <><div className="zk-loader" style={{ width: 14, height: 14 }} />Generating Proof…</>
+              ) : dbTierProof ? (
+                <><CheckCircle size={14} className="text-zero-green" />Tier Proof Ready</>
               ) : (
                 <><Zap size={14} />Generate Tier Proof</>
               )}

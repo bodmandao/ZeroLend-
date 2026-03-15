@@ -12,21 +12,49 @@ import {
   getTierInfo, randomField, formatAleo, aleoToMicro,
   microToAleo, computeInterest, executeTransaction,
   PROGRAM_ID, TIERS, getCurrentBlockHeight,
-  waitForRecordCiphertext, fetchPoolStats,
+  waitForRecordCiphertext as _unused, fetchPoolStats, scoreToTier,
 } from '../../lib/aleo';
-import { insertLoan } from '../../lib/supabase';
+import { insertLoan, getExistingAttestation } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 export default function BorrowPage() {
   const { transactionStatus, decrypt, requestRecords, connected, address, executeTransaction: executeHandler } = useWallet();
   const {
     wallet, creditScore, creditTier, tierProof,
-    addLoan, addTransaction, poolStats, setPoolStats,
+    addLoan, addTransaction, poolStats, setPoolStats, setCreditRecord,
   } = useStore();
 
   const [amount, setAmount]         = useState('');
   const [step, setStep]             = useState<'idle' | 'requesting' | 'done'>('idle');
   const [activeLoan, setActiveLoan] = useState<any>(null);
+  const [hydrated, setHydrated]     = useState(false);
+  const [dbTierProof, setDbTierProof] = useState(false);
+
+  useEffect(() => {
+    setHydrated(true);
+    if (!connected || !address) return;
+    (async () => {
+      try {
+        const att = await getExistingAttestation(address);
+        if (!att) return;
+        const score = att.computed_score ?? 0;
+        const tier  = scoreToTier(score) as any;
+        if (creditScore === null) {
+          setCreditRecord?.({
+            owner:           address,
+            wallet_age_days: String(att.wallet_age_days),
+            repayments_made: String(att.repayments_made),
+            defaults:        String(att.defaults),
+            total_volume:    String(att.total_volume),
+            current_score:   String(score),
+            last_updated:    '0',
+            nonce:           att.attestation_id,
+          }, score, tier);
+        }
+        if (att.tier_proof_generated) setDbTierProof(true);
+      } catch { /* DB unavailable */ }
+    })();
+  }, [connected, address]);
 
   // Fetch pool stats when connected so we can cap borrow amount
   useEffect(() => {
@@ -57,7 +85,7 @@ export default function BorrowPage() {
 
   // ── Request loan ─────────────────────────────────────────────
   async function handleRequestLoan() {
-    if (!tierProof || !address) return;
+    if (!address) return;
     if (amtNum <= 0 || amtNum > maxLoan) {
       toast.error(`Amount must be between 0.01 and ${maxLoan.toLocaleString()} ALEO`);
       return;
@@ -68,11 +96,33 @@ export default function BorrowPage() {
       const loanNonce  = randomField();
       const currentBlk = await getCurrentBlockHeight();
 
+      // Fetch CreditTierProof from wallet — latest unspent, sorted by blockHeight
+      const records = await requestRecords?.(PROGRAM_ID, false);
+      const proofRec = (records ?? [])
+        .filter((r: any) => {
+          const isOwner = r.owner === address || r.sender === address;
+          return isOwner && r.recordName === 'CreditTierProof' && !r.spent;
+        })
+        .sort((a: any, b: any) => (b.blockHeight ?? 0) - (a.blockHeight ?? 0))[0];
+
+      if (!proofRec) {
+        toast.error('No CreditTierProof found in wallet — generate one on the Credit page first');
+        setStep('idle');
+        return;
+      }
+
+      const decryptedProof = await decrypt?.((proofRec as any).recordCiphertext);
+      if (!decryptedProof) {
+        toast.error('Could not decrypt tier proof');
+        setStep('idle');
+        return;
+      }
+
       const txId = await executeTransaction({
-        programId:   PROGRAM_ID,
-        functionName:  'request_loan',
+        programId:    PROGRAM_ID,
+        functionName: 'request_loan',
         inputs: [
-          tierProof,
+          decryptedProof,
           `${amtMicro}u64`,
           `${currentBlk}u32`,
           loanNonce,
@@ -80,21 +130,7 @@ export default function BorrowPage() {
         ],
       }, executeHandler, transactionStatus);
 
-      // Build local loan record (no token_id, u64 principal)
-      // Fetch decrypted LoanRecord from the tx for store
-      const loanCipher = await waitForRecordCiphertext(txId);
-      const loanRecord = loanCipher && decrypt ? await decrypt(loanCipher) : null;
-      const loan: any = loanRecord ?? {
-        owner:          address,
-        loan_id:        loanId,
-        principal:      `${amtMicro}u64`,
-        interest_rate:  `${rateBps}u64`,
-        borrowed_block: `${currentBlk}u32`,
-        due_block:      `${currentBlk + 86400}u32`,
-        tier_at_borrow: `${creditTier}u8`,
-        nonce:          loanNonce,
-      };
-
+      // Save to DB
       await insertLoan({
         borrower_address: address,
         loan_id_field:    loanId,
@@ -105,6 +141,18 @@ export default function BorrowPage() {
         due_at_block:     currentBlk + 86400,
         tx_id:            txId,
       });
+
+      const loan: any = {
+        owner:          address,
+        loan_id:        loanId,
+        principal:      `${amtMicro}u64`,
+        interest_rate:  `${rateBps}u64`,
+        borrowed_block: `${currentBlk}u32`,
+        due_block:      `${currentBlk + 86400}u32`,
+        tier_at_borrow: `${creditTier}u8`,
+        nonce:          loanNonce,
+        tx_id:          txId,
+      };
 
       addLoan(loan);
       addTransaction({
@@ -126,6 +174,7 @@ export default function BorrowPage() {
   }
 
   // ── No credit / not connected guard ─────────────────────────
+  if (!hydrated) return null; // wait for Zustand to rehydrate from localStorage
   if (!connected || !address) {
     return (
       <div className="p-6 max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[60vh] text-center">
@@ -218,7 +267,7 @@ export default function BorrowPage() {
               <h3 className="text-sm font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
                 ZK Tier Proof
               </h3>
-              {tierProof ? (
+              {(tierProof || dbTierProof) ? (
                 <span className="tag" style={{ background: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.3)', color: '#10b981' }}>
                   <CheckCircle size={10} /> Valid
                 </span>
@@ -228,7 +277,7 @@ export default function BorrowPage() {
                 </span>
               )}
             </div>
-            {tierProof ? (
+            {(tierProof || dbTierProof) ? (
               <p className="text-xs leading-relaxed" style={{ color: '#10b981' }}>
                 Tier proof ready — your creditworthiness is verified. No raw data exposed.
               </p>
@@ -320,7 +369,7 @@ export default function BorrowPage() {
 
             <button
               onClick={handleRequestLoan}
-              disabled={!tierProof || amtNum <= 0 || amtNum > maxLoan || step === 'requesting'}
+              disabled={(!tierProof && !dbTierProof) || amtNum <= 0 || amtNum > maxLoan || step === 'requesting'}
               className="btn-primary w-full flex items-center justify-center gap-2"
             >
               {step === 'requesting' ? (

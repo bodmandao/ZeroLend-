@@ -266,6 +266,7 @@ export async function getLatestDepositTxId(): Promise<string | null> {
   return data?.tx_id ?? null;
 }
  
+
 // ── Mark deposit as withdrawn ─────────────────────────────────
 export async function markDepositWithdrawn(depositNonce: string) {
   const { error } = await supabase
@@ -274,4 +275,26 @@ export async function markDepositWithdrawn(depositNonce: string) {
     .eq('deposit_nonce', depositNonce);
   if (error) console.error('[supabase] markDepositWithdrawn:', error.message);
 }
-
+ 
+// ── Mark tier proof as generated ─────────────────────────────
+export async function markTierProofGenerated(userAddress: string, txId: string) {
+  const { error } = await supabase
+    .from('credit_attestations')
+    .update({ tier_proof_generated: true, prove_tier_tx_id: txId })
+    .eq('user_address', userAddress);
+  if (error) console.error('[supabase] markTierProofGenerated:', error.message);
+}
+ 
+// ── Check if user has generated a tier proof ─────────────────
+export async function getTierProofStatus(userAddress: string): Promise<{
+  generated: boolean;
+  txId:      string | null;
+} | null> {
+  const { data } = await supabase
+    .from('credit_attestations')
+    .select('tier_proof_generated, prove_tier_tx_id')
+    .eq('user_address', userAddress)
+    .single();
+  if (!data) return null;
+  return { generated: data.tier_proof_generated, txId: data.prove_tier_tx_id };
+}
