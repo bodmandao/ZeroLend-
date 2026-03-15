@@ -35,8 +35,9 @@ interface ZeroLendStore {
   // Loans & deposits (local optimistic state — not persisted, re-fetched from DB)
   loans:    any[];
   deposits: any[];
-  addLoan:    (loan: any)    => void;
-  addDeposit: (deposit: any) => void;
+  addLoan:       (loan: any)       => void;
+  addDeposit:    (deposit: any)    => void;
+  removeDeposit: (nonce: string)   => void;
 
   // Transaction history (not persisted)
   transactions: any[];
@@ -70,7 +71,7 @@ export const useStore = create<ZeroLendStore>()(
       setTierProof: (proof) => set({ tierProof: proof }),
 
       clearCredit: () =>
-        set({ creditScore: null, creditTier: null, creditRecord: null, tierProof: null }),
+        set({ creditScore: null, creditTier: null, creditRecord: null, tierProof: null, poolStats: null }),
 
       // ── Pool stats ───────────────────────────────────────────
       poolStats:    null,
@@ -79,8 +80,9 @@ export const useStore = create<ZeroLendStore>()(
       // ── Loans & deposits ─────────────────────────────────────
       loans:    [],
       deposits: [],
-      addLoan:    (loan)    => set((s) => ({ loans:    [loan,    ...s.loans]    })),
-      addDeposit: (deposit) => set((s) => ({ deposits: [deposit, ...s.deposits] })),
+      addLoan:       (loan)    => set((s) => ({ loans:    [loan,    ...s.loans]    })),
+      addDeposit:    (deposit) => set((s) => ({ deposits: [deposit, ...s.deposits] })),
+      removeDeposit: (nonce)   => set((s) => ({ deposits: s.deposits.filter((d: any) => d.nonce !== nonce) })),
 
       // ── Transactions ─────────────────────────────────────────
       transactions: [],

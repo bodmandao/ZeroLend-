@@ -1,24 +1,22 @@
 import credits.aleo;
 
-program zerolend_lending_pool_v2.aleo {
+program zerolend_lending_pool_v3.aleo {
 
     // ================================================================
     // RECORDS
     // ================================================================
 
-    /// Full private credit data — only owner can see
     record CreditRecord {
         owner:             address,
         wallet_age_days:   u32,
         repayments_made:   u32,
         defaults:          u32,
-        total_volume:      u64,   // in microcredits (matches credits.aleo)
+        total_volume:      u64,
         current_score:     u32,
         last_updated:      u32,
         nonce:             field,
     }
 
-    /// Lightweight tier credential — proves tier only, zero raw data
     record CreditTierProof {
         owner:      address,
         tier:       u8,
@@ -27,22 +25,20 @@ program zerolend_lending_pool_v2.aleo {
         nonce:      field,
     }
 
-    /// Private loan record held by borrower
     record LoanRecord {
         owner:          address,
         loan_id:        field,
-        principal:      u64,    // microcredits
-        interest_rate:  u64,    // basis points per 1000 blocks
+        principal:      u64,
+        interest_rate:  u64,
         borrowed_block: u32,
         due_block:      u32,
         tier_at_borrow: u8,
         nonce:          field,
     }
 
-    /// Private deposit receipt held by lender
     record LenderDeposit {
         owner:            address,
-        deposited_amount: u64,   // microcredits
+        deposited_amount: u64,
         deposit_block:    u32,
         nonce:            field,
     }
@@ -51,81 +47,59 @@ program zerolend_lending_pool_v2.aleo {
     // CONSTANTS
     // ================================================================
 
-    // Interest rates per tier (basis points per 1000 blocks)
-    const RATE_TIER_1: u64 = 2000u64; // 20% — Poor
-    const RATE_TIER_2: u64 = 1500u64; // 15% — Fair
-    const RATE_TIER_3: u64 = 1000u64; // 10% — Good
-    const RATE_TIER_4: u64 =  700u64; //  7% — Great
-    const RATE_TIER_5: u64 =  400u64; //  4% — Excellent
+    const RATE_TIER_1: u64 = 2000u64;
+    const RATE_TIER_2: u64 = 1500u64;
+    const RATE_TIER_3: u64 = 1000u64;
+    const RATE_TIER_4: u64 =  700u64;
+    const RATE_TIER_5: u64 =  400u64;
 
-    // Max loan per tier in microcredits (1 ALEO = 1_000_000 microcredits)
-    const MAX_LOAN_TIER_1: u64 =    10_000_000u64; //    10 ALEO
-    const MAX_LOAN_TIER_2: u64 =    50_000_000u64; //    50 ALEO
-    const MAX_LOAN_TIER_3: u64 =   200_000_000u64; //   200 ALEO
-    const MAX_LOAN_TIER_4: u64 = 1_000_000_000u64; // 1,000 ALEO
-    const MAX_LOAN_TIER_5: u64 = 5_000_000_000u64; // 5,000 ALEO
+    const MAX_LOAN_TIER_1: u64 =    10_000_000u64;
+    const MAX_LOAN_TIER_2: u64 =    50_000_000u64;
+    const MAX_LOAN_TIER_3: u64 =   200_000_000u64;
+    const MAX_LOAN_TIER_4: u64 = 1_000_000_000u64;
+    const MAX_LOAN_TIER_5: u64 = 5_000_000_000u64;
 
-    // Grace period before liquidation (~1 day at 10s/block)
     const GRACE_PERIOD: u32 = 8640u32;
 
     // ================================================================
-    // MAPPINGS — public on-chain state
+    // MAPPINGS
     // ================================================================
 
-    mapping protocol_admin:       u8      => address;
-    // Pool state (all values in microcredits)
-    mapping pool_liquidity:       u8      => u64;
-    mapping pool_borrowed:        u8      => u64;
-    mapping pool_interest_earned: u8      => u64;
-    mapping active_loan_count:    u8      => u32;
-
-    // Loan terms per tier (in blocks)
-    mapping loan_term_blocks:     u8      => u32;
-
-    // Nullifier sets
-    mapping loan_nullifiers:      field   => bool;
-
-    // Public aggregate credit stats — no individual data exposed
-    mapping aggregate_tier_count: u8      => u32;
-
-    @noupgrade
-    async constructor(
-    ) {}
+    mapping protocol_admin:       u8    => address;
+    mapping pool_liquidity:       u8    => u64;
+    mapping pool_borrowed:        u8    => u64;
+    mapping pool_interest_earned: u8    => u64;
+    mapping active_loan_count:    u8    => u32;
+    mapping loan_term_blocks:     u8    => u32;
+    mapping loan_nullifiers:      field => bool;
+    mapping aggregate_tier_count: u8    => u32;
 
     // ================================================================
-    // HELPER FUNCTIONS (pure)
+    // HELPERS
     // ================================================================
 
-    /// Compute credit score 0-1000 from raw inputs
     function compute_credit_score(
         wallet_age_days: u32,
         repayments_made: u32,
         defaults:        u32,
         total_volume:    u64
     ) -> u32 {
-        // Age component: max 200 pts (2 pts/day, cap 100 days)
         let age_pts: u32 = wallet_age_days * 2u32;
         let age_cap: u32 = age_pts > 200u32 ? 200u32 : age_pts;
 
-        // Repayment component: max 400 pts (10 pts each, cap 40)
         let rep_pts: u32 = repayments_made * 10u32;
         let rep_cap: u32 = rep_pts > 400u32 ? 400u32 : rep_pts;
 
-        // Volume component: max 200 pts (1 pt per 1 ALEO = 1_000_000 microcredits)
         let vol_u32: u32 = (total_volume / 1_000_000u64) as u32;
         let vol_cap: u32 = vol_u32 > 200u32 ? 200u32 : vol_u32;
 
-        // Base: 200 pts for any wallet
         let raw: u32     = 200u32 + age_cap + rep_cap + vol_cap;
-
-        // Default penalty: -100 pts each
         let penalty: u32 = defaults * 100u32;
         let after: u32   = raw > penalty ? raw - penalty : 0u32;
 
         return after > 1000u32 ? 1000u32 : after;
     }
 
-    /// Map score to tier band 1-5
     function score_to_tier(score: u32) -> u8 {
         if score >= 850u32 { return 5u8; }
         if score >= 700u32 { return 4u8; }
@@ -134,17 +108,11 @@ program zerolend_lending_pool_v2.aleo {
         return 1u8;
     }
 
-    /// interest = principal * rate_bps * blocks / 10_000_000
-    function compute_interest(
-        principal:   u64,
-        rate_bps:    u64,
-        blocks_held: u32
-    ) -> u64 {
+    function compute_interest(principal: u64, rate_bps: u64, blocks_held: u32) -> u64 {
         let blocks: u64 = blocks_held as u64;
         return (principal * rate_bps * blocks) / 10_000_000u64;
     }
 
-    /// Get interest rate bps for tier
     function rate_for_tier(tier: u8) -> u64 {
         if tier == 5u8 { return RATE_TIER_5; }
         if tier == 4u8 { return RATE_TIER_4; }
@@ -153,7 +121,6 @@ program zerolend_lending_pool_v2.aleo {
         return RATE_TIER_1;
     }
 
-    /// Get max loan microcredits for tier
     function max_loan_for_tier(tier: u8) -> u64 {
         if tier == 5u8 { return MAX_LOAN_TIER_5; }
         if tier == 4u8 { return MAX_LOAN_TIER_4; }
@@ -162,12 +129,14 @@ program zerolend_lending_pool_v2.aleo {
         return MAX_LOAN_TIER_1;
     }
 
+       @noupgrade
+    async constructor(
+    ) {}
+
     // ================================================================
     // SECTION 1 — PROTOCOL SETUP
     // ================================================================
 
-    /// Initialize protocol. Caller becomes admin and first oracle.
-    /// Call once after deployment — guarded against re-initialization.
     async transition initialize() -> Future {
         return finalize_initialize(self.caller);
     }
@@ -175,31 +144,26 @@ program zerolend_lending_pool_v2.aleo {
     async function finalize_initialize(admin: address) {
         let existing: address = Mapping::get_or_use(
             protocol_admin, 0u8,
-            aleo1handyyun9zlhv56sgkjc7qp3mg0fsk0d8aqamt49g3sds4nu4urqsudpkf
+            aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc
         );
-        assert_eq(existing, aleo1handyyun9zlhv56sgkjc7qp3mg0fsk0d8aqamt49g3sds4nu4urqsudpkf);
+        assert_eq(existing, aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc);
 
         Mapping::set(protocol_admin,       0u8, admin);
         Mapping::set(pool_liquidity,       0u8, 0u64);
         Mapping::set(pool_borrowed,        0u8, 0u64);
         Mapping::set(pool_interest_earned, 0u8, 0u64);
         Mapping::set(active_loan_count,    0u8, 0u32);
-
-        // Default loan terms per tier (in blocks)
-        Mapping::set(loan_term_blocks, 1u8,  17280u32); // ~2 days
-        Mapping::set(loan_term_blocks, 2u8,  43200u32); // ~5 days
-        Mapping::set(loan_term_blocks, 3u8,  86400u32); // ~10 days
-        Mapping::set(loan_term_blocks, 4u8, 172800u32); // ~20 days
-        Mapping::set(loan_term_blocks, 5u8, 259200u32); // ~30 days
+        Mapping::set(loan_term_blocks, 1u8,  17280u32);
+        Mapping::set(loan_term_blocks, 2u8,  43200u32);
+        Mapping::set(loan_term_blocks, 3u8,  86400u32);
+        Mapping::set(loan_term_blocks, 4u8, 172800u32);
+        Mapping::set(loan_term_blocks, 5u8, 259200u32);
     }
 
     // ================================================================
     // SECTION 2 — CREDIT ATTESTATION
     // ================================================================
 
-    /// User calls this directly with data pre-filled by the frontend from
-    /// on-chain history and ZeroLend DB. Inputs are read-only in the UI.
-    /// Produces a private CreditRecord directly in the user's wallet.
     async transition attest_credit(
         wallet_age_days: u32,
         repayments_made: u32,
@@ -208,12 +172,7 @@ program zerolend_lending_pool_v2.aleo {
         current_block:   u32,
         record_nonce:    field
     ) -> (CreditRecord, Future) {
-        let score: u32 = compute_credit_score(
-            wallet_age_days,
-            repayments_made,
-            defaults,
-            total_volume
-        );
+        let score: u32 = compute_credit_score(wallet_age_days, repayments_made, defaults, total_volume);
 
         let rec: CreditRecord = CreditRecord {
             owner:           self.caller as address,
@@ -236,11 +195,9 @@ program zerolend_lending_pool_v2.aleo {
     }
 
     // ================================================================
-    // SECTION 3 — CREDIT RECORD MANAGEMENT (prove_tier, request_loan, etc.)
+    // SECTION 3 — TIER PROOF
     // ================================================================
 
-    /// User generates a CreditTierProof from their CreditRecord.
-    /// Reveals ONLY the tier number (1-5). Zero raw data exposed.
     transition prove_tier(
         rec:           CreditRecord,
         proof_nonce:   field,
@@ -250,7 +207,6 @@ program zerolend_lending_pool_v2.aleo {
     ) -> (CreditRecord, CreditTierProof) {
         let tier: u8 = score_to_tier(rec.current_score);
 
-        // Re-issue record back to owner (Leo records are consumed on use)
         let returned_rec: CreditRecord = CreditRecord {
             owner:           rec.owner,
             wallet_age_days: rec.wallet_age_days,
@@ -274,21 +230,17 @@ program zerolend_lending_pool_v2.aleo {
     }
 
     // ================================================================
-    // SECTION 5 — LENDING POOL (credits.aleo native)
+    // SECTION 4 — LENDING POOL
     // ================================================================
 
-    /// Lender deposits ALEO credits into the pool.
-    /// Uses credits.aleo/transfer_private to move funds to the pool address.
-    /// Returns change to lender + private LenderDeposit receipt.
     async transition deposit(
         input_credits: credits.aleo/credits,
         amount:        u64,
         current_block: u32,
         dep_nonce:     field
     ) -> (credits.aleo/credits, LenderDeposit, Future) {
-        // Transfer amount to pool program address; return change to lender
-        let (change, pool_receipt): (credits.aleo/credits, credits.aleo/credits) =
-            credits.aleo/transfer_private(input_credits, self.address, amount);
+        let (change, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_private_to_public(input_credits, self.address, amount);
 
         let receipt: LenderDeposit = LenderDeposit {
             owner:            self.caller as address,
@@ -297,34 +249,34 @@ program zerolend_lending_pool_v2.aleo {
             nonce:            dep_nonce,
         };
 
-        return (change, receipt, finalize_deposit(amount));
+        return (change, receipt, finalize_deposit(transfer_future, amount));
     }
 
-    async function finalize_deposit(amount: u64) {
+    async function finalize_deposit(transfer_future: Future, amount: u64) {
+        transfer_future.await();
         let liq: u64 = Mapping::get_or_use(pool_liquidity, 0u8, 0u64);
         Mapping::set(pool_liquidity, 0u8, liq + amount);
     }
 
-    /// Lender withdraws principal + accrued yield.
+    /// Lender withdraws: pool public balance → private credits record.
     async transition withdraw(
-        pool_credits:  credits.aleo/credits,
         receipt:       LenderDeposit,
         current_block: u32
-    ) -> (credits.aleo/credits, credits.aleo/credits, Future) {
+    ) -> (credits.aleo/credits, Future) {
         assert_eq(receipt.owner, self.caller);
 
         let blocks: u32    = current_block - receipt.deposit_block;
         let yield_amt: u64 = compute_interest(receipt.deposited_amount, RATE_TIER_3, blocks);
         let total: u64     = receipt.deposited_amount + yield_amt;
 
-        // Send principal + yield to lender; keep remainder in pool
-        let (payout, pool_change): (credits.aleo/credits, credits.aleo/credits) =
-            credits.aleo/transfer_private(pool_credits, self.caller, total);
+        let (payout, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_public_to_private(self.caller, total);
 
-        return (payout, pool_change, finalize_withdraw(receipt.deposited_amount, yield_amt));
+        return (payout, finalize_withdraw(transfer_future, receipt.deposited_amount, yield_amt));
     }
 
-    async function finalize_withdraw(principal: u64, yield_paid: u64) {
+    async function finalize_withdraw(transfer_future: Future, principal: u64, yield_paid: u64) {
+       transfer_future.await();
         let liq: u64 = Mapping::get(pool_liquidity, 0u8);
         assert(liq >= principal + yield_paid);
         Mapping::set(pool_liquidity, 0u8, liq - principal - yield_paid);
@@ -336,30 +288,25 @@ program zerolend_lending_pool_v2.aleo {
     }
 
     // ================================================================
-    // SECTION 6 — LOAN LIFECYCLE
+    // SECTION 5 — LOAN LIFECYCLE
     // ================================================================
 
-    /// Borrower requests a loan using their CreditTierProof.
-    /// Pool transfers ALEO credits privately to borrower.
+    /// Borrow: pool public balance → borrower's private credits record.
     async transition request_loan(
-        proof:        CreditTierProof,
-        pool_credits: credits.aleo/credits,
-        amount:       u64,
+        proof:         CreditTierProof,
+        amount:        u64,
         current_block: u32,
-        loan_nonce:   field,
-        loan_id:      field
-    ) -> (CreditTierProof, LoanRecord, credits.aleo/credits, credits.aleo/credits, Future) {
-        // Proof must be unexpired
+        loan_nonce:    field,
+        loan_id:       field
+    ) -> (CreditTierProof, LoanRecord, credits.aleo/credits, Future) {
         assert(current_block <= proof.expires_at);
 
-        // Amount within tier limit and positive
         let max_loan: u64 = max_loan_for_tier(proof.tier);
         assert(amount <= max_loan);
         assert(amount > 0u64);
 
         let rate: u64 = rate_for_tier(proof.tier);
 
-        // Re-issue tier proof back to borrower
         let returned_proof: CreditTierProof = CreditTierProof {
             owner:      proof.owner,
             tier:       proof.tier,
@@ -368,50 +315,41 @@ program zerolend_lending_pool_v2.aleo {
             nonce:      proof.nonce,
         };
 
-        // Private loan record stored in borrower's wallet
         let loan: LoanRecord = LoanRecord {
             owner:          proof.owner,
             loan_id:        loan_id,
             principal:      amount,
             interest_rate:  rate,
             borrowed_block: current_block,
-            due_block:      current_block + 86400u32, // ~10 days default
+            due_block:      current_block + 86400u32,
             tier_at_borrow: proof.tier,
             nonce:          loan_nonce,
         };
 
-        // Privately send loan amount from pool to borrower
-        let (loan_funds, pool_change): (credits.aleo/credits, credits.aleo/credits) =
-            credits.aleo/transfer_private(pool_credits, proof.owner, amount);
+        let (loan_funds, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_public_to_private(proof.owner, amount);
 
-        return (
-            returned_proof,
-            loan,
-            loan_funds,
-            pool_change,
-            finalize_request_loan(amount, loan_id)
-        );
+        return (returned_proof, loan, loan_funds, finalize_request_loan(transfer_future, amount, loan_id));
     }
 
-    async function finalize_request_loan(amount: u64, loan_id: field) {
-        // Nullifier: prevent loan_id reuse
+    async function finalize_request_loan(transfer_future: Future, amount: u64, loan_id: field) {
+       transfer_future.await();
         let used: bool = Mapping::get_or_use(loan_nullifiers, loan_id, false);
         assert(!used);
         Mapping::set(loan_nullifiers, loan_id, true);
 
-        // Pool must have sufficient available liquidity
         let liq: u64 = Mapping::get_or_use(pool_liquidity, 0u8, 0u64);
         let bor: u64 = Mapping::get_or_use(pool_borrowed,  0u8, 0u64);
-        assert(liq - bor >= amount);
+        assert(liq >= bor + amount);
 
-        Mapping::set(pool_borrowed, 0u8, bor + amount);
+        Mapping::set(pool_borrowed,     0u8, bor + amount);
+        Mapping::set(pool_liquidity,    0u8, liq + amount); // liquidity tracks gross deposits, not net
 
         let lc: u32 = Mapping::get_or_use(active_loan_count, 0u8, 0u32);
         Mapping::set(active_loan_count, 0u8, lc + 1u32);
     }
 
-    /// Borrower repays loan (principal + interest) using credits.aleo.
-    /// Credit record updated: repayments_made++, score recalculated.
+    /// Repay: borrower's private credits → pool public balance.
     async transition repay_loan(
         loan:          LoanRecord,
         payment:       credits.aleo/credits,
@@ -428,16 +366,12 @@ program zerolend_lending_pool_v2.aleo {
 
         assert(payment.microcredits >= owed);
 
-        // Send owed amount to pool; return change to borrower
-        let (pool_receipt, change): (credits.aleo/credits, credits.aleo/credits) =
-            credits.aleo/transfer_private(payment, self.address, owed);
+        let (change, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_private_to_public(payment, self.address, owed);
 
-        // Update credit record — successful repayment
         let new_reps: u32  = rec.repayments_made + 1u32;
         let new_vol: u64   = rec.total_volume + loan.principal;
-        let new_score: u32 = compute_credit_score(
-            rec.wallet_age_days, new_reps, rec.defaults, new_vol
-        );
+        let new_score: u32 = compute_credit_score(rec.wallet_age_days, new_reps, rec.defaults, new_vol);
 
         let old_tier: u8 = score_to_tier(rec.current_score);
         let new_tier: u8 = score_to_tier(new_score);
@@ -453,15 +387,17 @@ program zerolend_lending_pool_v2.aleo {
             nonce:           new_rec_nonce,
         };
 
-        return (change, updated_rec, finalize_repay_loan(loan.principal, interest, old_tier, new_tier));
+        return (change, updated_rec, finalize_repay_loan(transfer_future, loan.principal, interest, old_tier, new_tier));
     }
 
     async function finalize_repay_loan(
-        principal: u64,
-        interest:  u64,
-        old_tier:  u8,
-        new_tier:  u8
+        transfer_future: Future,
+        principal:       u64,
+        interest:        u64,
+        old_tier:        u8,
+        new_tier:        u8
     ) {
+        transfer_future.await();
         let bor: u64 = Mapping::get(pool_borrowed, 0u8);
         assert(bor >= principal);
         Mapping::set(pool_borrowed, 0u8, bor - principal);
@@ -472,7 +408,6 @@ program zerolend_lending_pool_v2.aleo {
         let lc: u32 = Mapping::get_or_use(active_loan_count, 0u8, 0u32);
         if lc > 0u32 { Mapping::set(active_loan_count, 0u8, lc - 1u32); }
 
-        // Shift aggregate tier counters
         let old_count: u32 = Mapping::get_or_use(aggregate_tier_count, old_tier, 0u32);
         if old_count > 0u32 {
             Mapping::set(aggregate_tier_count, old_tier, old_count - 1u32);
@@ -481,8 +416,7 @@ program zerolend_lending_pool_v2.aleo {
         Mapping::set(aggregate_tier_count, new_tier, new_count + 1u32);
     }
 
-    /// Liquidate an overdue loan — callable by anyone after due_block + GRACE_PERIOD.
-    /// Borrower's credit record penalized: defaults++, score drops.
+    /// Liquidate overdue loan — callable by anyone after due_block + GRACE_PERIOD.
     async transition liquidate(
         loan:          LoanRecord,
         rec:           CreditRecord,
@@ -516,10 +450,7 @@ program zerolend_lending_pool_v2.aleo {
 
     async function finalize_liquidate(principal: u64, old_tier: u8, new_tier: u8) {
         let bor: u64 = Mapping::get_or_use(pool_borrowed, 0u8, 0u64);
-        Mapping::set(
-            pool_borrowed, 0u8,
-            bor >= principal ? bor - principal : 0u64
-        );
+        Mapping::set(pool_borrowed, 0u8, bor >= principal ? bor - principal : 0u64);
 
         let lc: u32 = Mapping::get_or_use(active_loan_count, 0u8, 0u32);
         if lc > 0u32 { Mapping::set(active_loan_count, 0u8, lc - 1u32); }
@@ -533,12 +464,9 @@ program zerolend_lending_pool_v2.aleo {
     }
 
     // ================================================================
-    // SECTION 7 — SOLVENCY PROOF (public, verifiable by anyone)
+    // SECTION 6 — SOLVENCY PROOF
     // ================================================================
 
-    /// Publicly proves pool solvency: borrowed <= liquidity.
-    /// Individual positions remain fully private.
-    /// This is ZeroLend's core trustless guarantee.
     async transition prove_solvency() -> Future {
         return finalize_prove_solvency();
     }

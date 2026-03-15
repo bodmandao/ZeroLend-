@@ -12,7 +12,7 @@ import {
   computeInterest, executeTransaction, PROGRAM_ID,
   getCurrentBlockHeight, waitForRecordCiphertext, fetchPoolStats,
 } from '../../lib/aleo';
-import { insertDeposit, getDepositsByAddress } from '../../lib/supabase';
+import { insertDeposit, getDepositsByAddress, markDepositWithdrawn } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 // Lenders earn at Tier 3 rate (10% APR)
@@ -20,18 +20,19 @@ const LENDER_RATE_BPS = 1000;
 
 export default function LendPage() {
   const { transactionStatus, decrypt, requestRecords, executeTransaction: executeHandler, connected, address } = useWallet();
-  const { deposits, addDeposit, poolStats, setPoolStats } = useStore();
+  const { deposits, addDeposit, removeDeposit, poolStats, setPoolStats } = useStore();
 
   const [depositAmt, setDepositAmt] = useState('');
   const [tab, setTab]               = useState<'deposit' | 'withdraw'>('deposit');
-  const [step, setStep]             = useState<'idle' | 'processing' | 'done'>('idle');
+  const [step, setStep]                   = useState<'idle' | 'processing' | 'done'>('idle');
+  const [withdrawingNonce, setWithdrawingNonce] = useState<string | null>(null);
 
-  // Fetch pool stats on mount
+  // Fetch pool stats only when connected
   useEffect(() => {
-    fetchPoolStats().then(stats => { console.log(stats); if (stats) setPoolStats(stats); });
-  }, []);
+    if (!connected) return;
+    fetchPoolStats().then(stats => { if (stats) setPoolStats(stats); });
+  }, [connected]);
 
-  // Load deposits from DB when wallet connects
   useEffect(() => {
     if (!connected || !address) return;
     getDepositsByAddress(address).then(rows => {
@@ -55,8 +56,8 @@ export default function LendPage() {
   );
 
   const utilization    = poolStats?.utilizationRate ?? 0;
-  const totalLiquidity = poolStats ? microToAleo(poolStats.totalLiquidity) : 0;
-  const totalBorrowed  = poolStats ? microToAleo(poolStats.totalBorrowed)  : 0;
+  const totalLiquidity = connected && poolStats ? microToAleo(poolStats.totalLiquidity) : null;
+  const totalBorrowed  = connected && poolStats ? microToAleo(poolStats.totalBorrowed)  : null;
 
   // ── Deposit ──────────────────────────────────────────────────
   async function handleDeposit() {
@@ -73,17 +74,22 @@ export default function LendPage() {
       const nonce      = randomField();
       const currentBlk = await getCurrentBlockHeight();
 
-      // Fetch the user's credits.aleo/credits record and decrypt it
       const creditRecords = await requestRecords?.('credits.aleo', false);
-      const creditsRec = creditRecords?.find((r: any) => {
-        const isOwner = r.owner === address || r.sender === address;
-        return isOwner && r.recordName === 'credits' && !r.spent;
-      });
-      if (!creditsRec) {
-        toast.error('No credits record found in your wallet');
+
+      const unspent = (creditRecords ?? [])
+        .filter((r: any) => {
+          const isOwner = r.owner === address || r.sender === address;
+          return isOwner && r.recordName === 'credits' && !r.spent;
+        })
+        .sort((a: any, b: any) => (b.blockHeight ?? 0) - (a.blockHeight ?? 0));
+
+      if (unspent.length === 0) {
+        toast.error('No credits records found in your wallet');
         setStep('idle');
         return;
       }
+
+      const creditsRec     = unspent[0];
       const decryptedCredits = await decrypt?.((creditsRec as any).recordCiphertext);
       if (!decryptedCredits) {
         toast.error('Could not decrypt credits record');
@@ -119,7 +125,7 @@ export default function LendPage() {
         tx_id:            txId,
         status:           'active',
       });
-      fetchPoolStats()
+      fetchPoolStats().then(stats => { if (stats) setPoolStats(stats); });
       toast.success(`Deposited ${formatAleo(amtMicro)} to the pool!`);
       setDepositAmt('');
       setStep('done');
@@ -134,29 +140,34 @@ export default function LendPage() {
   async function handleWithdraw(deposit: any) {
     if (!address || !deposit.tx_id) return;
     setStep('processing');
+    setWithdrawingNonce(deposit.nonce);
     try {
       const currentBlk = await getCurrentBlockHeight();
 
-      // Fetch the real LenderDeposit ciphertext from the deposit tx and decrypt
-      const cipher = await waitForRecordCiphertext(deposit.tx_id);
-      if (!cipher) throw new Error('Could not fetch deposit record from chain');
-      const decryptedDeposit = await decrypt?.(cipher);
-      if (!decryptedDeposit) throw new Error('Could not decrypt deposit record');
+      const receiptCipher = await waitForRecordCiphertext(deposit.tx_id, 20, 5_000, 0);
+      if (!receiptCipher) throw new Error('Could not fetch deposit receipt from chain');
+      const decryptedReceipt = await decrypt?.(receiptCipher);
+      if (!decryptedReceipt) throw new Error('Could not decrypt deposit receipt');
 
       await executeTransaction({
-        programId:   PROGRAM_ID,
-        functionName:  'withdraw',
+        programId:    PROGRAM_ID,
+        functionName: 'withdraw',
         inputs: [
-          decryptedDeposit,
+          decryptedReceipt,
           `${currentBlk}u32`,
         ],
       }, executeHandler, transactionStatus);
 
       const depAmt = parseInt(String(deposit.deposited_amount)) || deposit.amount || 0;
+      removeDeposit(deposit.nonce);
+      markDepositWithdrawn(deposit.nonce);
+      fetchPoolStats().then(stats => { if (stats) setPoolStats(stats); });
       toast.success(`Withdrawn ${formatAleo(depAmt)} + yield!`);
+      setWithdrawingNonce(null);
       setStep('idle');
     } catch (e: any) {
       toast.error(e.message ?? 'Withdrawal failed');
+      setWithdrawingNonce(null);
       setStep('idle');
     }
   }
@@ -179,25 +190,25 @@ export default function LendPage() {
         {[
           {
             label: 'Pool Liquidity',
-            value: `${totalLiquidity.toLocaleString()} ALEO`,
+            value: totalLiquidity !== null ? `${totalLiquidity.toLocaleString()} ALEO` : '—',
             icon:  Wallet,
             color: '#00d4ff',
           },
           {
             label: 'Total Borrowed',
-            value: `${totalBorrowed.toLocaleString()} ALEO`,
+            value: totalBorrowed !== null ? `${totalBorrowed.toLocaleString()} ALEO` : '—',
             icon:  TrendingUp,
             color: '#a855f7',
           },
           {
             label: 'Utilization',
-            value: `${utilization}%`,
+            value: connected && poolStats ? `${utilization}%` : '—',
             icon:  BarChart2,
             color: utilization > 80 ? '#ef4444' : '#10b981',
           },
           {
             label: 'Est. APY',
-            value: `${(LENDER_RATE_BPS / 100).toFixed(1)}%`,
+            value: connected ? `${(LENDER_RATE_BPS / 100).toFixed(1)}%` : '—',
             icon:  ArrowUpRight,
             color: '#00ffcc',
           },
@@ -348,9 +359,13 @@ export default function LendPage() {
                             <button
                               onClick={() => handleWithdraw(dep)}
                               disabled={step === 'processing'}
-                              className="btn-ghost text-xs px-4 py-2"
+                              className="btn-ghost text-xs px-4 py-2 flex items-center gap-1.5"
                             >
-                              Withdraw
+                              {withdrawingNonce === dep.nonce ? (
+                                <><div className="zk-loader" style={{ width: 12, height: 12 }} />Withdrawing…</>
+                              ) : (
+                                'Withdraw'
+                              )}
                             </button>
                           </div>
                         );

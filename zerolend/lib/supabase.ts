@@ -51,17 +51,6 @@ export async function markLoanLiquidated(loanIdField: string) {
 }
 
 
-// ── Get all active deposits for a lender ─────────────────────
-export async function getDepositsByAddress(lenderAddress: string) {
-  const { data } = await supabase
-    .from('deposits')
-    .select('*')
-    .eq('lender_address', lenderAddress)
-    .eq('status', 'active')
-    .order('created_at', { ascending: false });
-  return data ?? [];
-}
-
 
 export async function getPendingAttestation(address: string) {
   return supabase
@@ -239,6 +228,9 @@ export async function insertDeposit(params: {
   if (error) console.error('[supabase] insertDeposit:', error.message);
 }
 
+
+
+
 // ── Get deposit tx_id for withdrawal ─────────────────────────
 export async function getDepositTxId(lenderAddress: string, depositNonce: string): Promise<string | null> {
   const { data } = await supabase
@@ -248,5 +240,38 @@ export async function getDepositTxId(lenderAddress: string, depositNonce: string
     .eq('deposit_nonce', depositNonce)
     .single();
   return data?.tx_id ?? null;
+}
+ 
+// ── Get all active deposits for a lender ─────────────────────
+export async function getDepositsByAddress(lenderAddress: string) {
+  const { data } = await supabase
+    .from('deposits')
+    .select('*')
+    .eq('lender_address', lenderAddress)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false });
+  return data ?? [];
+}
+ 
+// ── Get the most recent deposit tx_id to fetch pool credits record ──
+// The pool's credits.aleo/credits is output[0] of every deposit tx
+export async function getLatestDepositTxId(): Promise<string | null> {
+  const { data } = await supabase
+    .from('deposits')
+    .select('tx_id')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+  return data?.tx_id ?? null;
+}
+ 
+// ── Mark deposit as withdrawn ─────────────────────────────────
+export async function markDepositWithdrawn(depositNonce: string) {
+  const { error } = await supabase
+    .from('deposits')
+    .update({ status: 'withdrawn' })
+    .eq('deposit_nonce', depositNonce);
+  if (error) console.error('[supabase] markDepositWithdrawn:', error.message);
 }
 

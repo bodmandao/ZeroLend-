@@ -1,5 +1,5 @@
 import credits.aleo;
-program zerolend_lending_pool_v2.aleo;
+program zerolend_lending_pool_v3.aleo;
 
 record CreditRecord:
     owner as address.private;
@@ -68,12 +68,12 @@ mapping aggregate_tier_count:
 
 function initialize:
     async initialize self.caller into r0;
-    output r0 as zerolend_lending_pool_v2.aleo/initialize.future;
+    output r0 as zerolend_lending_pool_v3.aleo/initialize.future;
 
 finalize initialize:
     input r0 as address.public;
-    get.or_use protocol_admin[0u8] aleo1handyyun9zlhv56sgkjc7qp3mg0fsk0d8aqamt49g3sds4nu4urqsudpkf into r1;
-    assert.eq r1 aleo1handyyun9zlhv56sgkjc7qp3mg0fsk0d8aqamt49g3sds4nu4urqsudpkf;
+    get.or_use protocol_admin[0u8] aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc into r1;
+    assert.eq r1 aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc;
     set r0 into protocol_admin[0u8];
     set 0u64 into pool_liquidity[0u8];
     set 0u64 into pool_borrowed[0u8];
@@ -136,7 +136,7 @@ function attest_credit:
     call score_to_tier r6 into r9;
     async attest_credit r9 into r10;
     output r8 as CreditRecord.record;
-    output r10 as zerolend_lending_pool_v2.aleo/attest_credit.future;
+    output r10 as zerolend_lending_pool_v3.aleo/attest_credit.future;
 
 finalize attest_credit:
     input r0 as u8.public;
@@ -162,19 +162,21 @@ function deposit:
     input r1 as u64.private;
     input r2 as u32.private;
     input r3 as field.private;
-    call credits.aleo/transfer_private r0 zerolend_lending_pool_v2.aleo r1 into r4 r5;
+    call credits.aleo/transfer_private_to_public r0 zerolend_lending_pool_v3.aleo r1 into r4 r5;
     cast self.caller into r6 as address;
     cast r6 r1 r2 r3 into r7 as LenderDeposit.record;
-    async deposit r1 into r8;
+    async deposit r5 r1 into r8;
     output r4 as credits.aleo/credits.record;
     output r7 as LenderDeposit.record;
-    output r8 as zerolend_lending_pool_v2.aleo/deposit.future;
+    output r8 as zerolend_lending_pool_v3.aleo/deposit.future;
 
 finalize deposit:
-    input r0 as u64.public;
-    get.or_use pool_liquidity[0u8] 0u64 into r1;
-    add r1 r0 into r2;
-    set r2 into pool_liquidity[0u8];
+    input r0 as credits.aleo/transfer_private_to_public.future;
+    input r1 as u64.public;
+    await r0;
+    get.or_use pool_liquidity[0u8] 0u64 into r2;
+    add r2 r1 into r3;
+    set r3 into pool_liquidity[0u8];
 
 closure compute_interest:
     input r0 as u64;
@@ -187,34 +189,34 @@ closure compute_interest:
     output r6 as u64;
 
 function withdraw:
-    input r0 as credits.aleo/credits.record;
-    input r1 as LenderDeposit.record;
-    input r2 as u32.private;
-    assert.eq r1.owner self.caller;
-    sub r2 r1.deposit_block into r3;
-    call compute_interest r1.deposited_amount 1000u64 r3 into r4;
-    add r1.deposited_amount r4 into r5;
-    call credits.aleo/transfer_private r0 self.caller r5 into r6 r7;
-    async withdraw r1.deposited_amount r4 into r8;
-    output r6 as credits.aleo/credits.record;
-    output r7 as credits.aleo/credits.record;
-    output r8 as zerolend_lending_pool_v2.aleo/withdraw.future;
+    input r0 as LenderDeposit.record;
+    input r1 as u32.private;
+    assert.eq r0.owner self.caller;
+    sub r1 r0.deposit_block into r2;
+    call compute_interest r0.deposited_amount 1000u64 r2 into r3;
+    add r0.deposited_amount r3 into r4;
+    call credits.aleo/transfer_public_to_private self.caller r4 into r5 r6;
+    async withdraw r6 r0.deposited_amount r3 into r7;
+    output r5 as credits.aleo/credits.record;
+    output r7 as zerolend_lending_pool_v3.aleo/withdraw.future;
 
 finalize withdraw:
-    input r0 as u64.public;
+    input r0 as credits.aleo/transfer_public_to_private.future;
     input r1 as u64.public;
-    get pool_liquidity[0u8] into r2;
-    add r0 r1 into r3;
-    gte r2 r3 into r4;
-    assert.eq r4 true;
-    sub r2 r0 into r5;
-    sub r5 r1 into r6;
-    set r6 into pool_liquidity[0u8];
-    get.or_use pool_interest_earned[0u8] 0u64 into r7;
-    gte r7 r1 into r8;
-    branch.eq r8 false to end_then_0_0;
-    sub r7 r1 into r9;
-    set r9 into pool_interest_earned[0u8];
+    input r2 as u64.public;
+    await r0;
+    get pool_liquidity[0u8] into r3;
+    add r1 r2 into r4;
+    gte r3 r4 into r5;
+    assert.eq r5 true;
+    sub r3 r1 into r6;
+    sub r6 r2 into r7;
+    set r7 into pool_liquidity[0u8];
+    get.or_use pool_interest_earned[0u8] 0u64 into r8;
+    gte r8 r2 into r9;
+    branch.eq r9 false to end_then_0_0;
+    sub r8 r2 into r10;
+    set r10 into pool_interest_earned[0u8];
     branch.eq true true to end_otherwise_0_1;
     position end_then_0_0;
     position end_otherwise_0_1;
@@ -245,47 +247,48 @@ closure rate_for_tier:
 
 function request_loan:
     input r0 as CreditTierProof.record;
-    input r1 as credits.aleo/credits.record;
-    input r2 as u64.private;
-    input r3 as u32.private;
+    input r1 as u64.private;
+    input r2 as u32.private;
+    input r3 as field.private;
     input r4 as field.private;
-    input r5 as field.private;
-    lte r3 r0.expires_at into r6;
-    assert.eq r6 true;
-    call max_loan_for_tier r0.tier into r7;
-    lte r2 r7 into r8;
+    lte r2 r0.expires_at into r5;
+    assert.eq r5 true;
+    call max_loan_for_tier r0.tier into r6;
+    lte r1 r6 into r7;
+    assert.eq r7 true;
+    gt r1 0u64 into r8;
     assert.eq r8 true;
-    gt r2 0u64 into r9;
-    assert.eq r9 true;
-    call rate_for_tier r0.tier into r10;
-    cast r0.owner r0.tier r0.org_id r0.expires_at r0.nonce into r11 as CreditTierProof.record;
-    add r3 86400u32 into r12;
-    cast r0.owner r5 r2 r10 r3 r12 r0.tier r4 into r13 as LoanRecord.record;
-    call credits.aleo/transfer_private r1 r0.owner r2 into r14 r15;
-    async request_loan r2 r5 into r16;
-    output r11 as CreditTierProof.record;
-    output r13 as LoanRecord.record;
-    output r14 as credits.aleo/credits.record;
-    output r15 as credits.aleo/credits.record;
-    output r16 as zerolend_lending_pool_v2.aleo/request_loan.future;
+    call rate_for_tier r0.tier into r9;
+    cast r0.owner r0.tier r0.org_id r0.expires_at r0.nonce into r10 as CreditTierProof.record;
+    add r2 86400u32 into r11;
+    cast r0.owner r4 r1 r9 r2 r11 r0.tier r3 into r12 as LoanRecord.record;
+    call credits.aleo/transfer_public_to_private r0.owner r1 into r13 r14;
+    async request_loan r14 r1 r4 into r15;
+    output r10 as CreditTierProof.record;
+    output r12 as LoanRecord.record;
+    output r13 as credits.aleo/credits.record;
+    output r15 as zerolend_lending_pool_v3.aleo/request_loan.future;
 
 finalize request_loan:
-    input r0 as u64.public;
-    input r1 as field.public;
-    get.or_use loan_nullifiers[r1] false into r2;
-    not r2 into r3;
-    assert.eq r3 true;
-    set true into loan_nullifiers[r1];
-    get.or_use pool_liquidity[0u8] 0u64 into r4;
-    get.or_use pool_borrowed[0u8] 0u64 into r5;
-    sub r4 r5 into r6;
-    gte r6 r0 into r7;
-    assert.eq r7 true;
-    add r5 r0 into r8;
-    set r8 into pool_borrowed[0u8];
-    get.or_use active_loan_count[0u8] 0u32 into r9;
-    add r9 1u32 into r10;
-    set r10 into active_loan_count[0u8];
+    input r0 as credits.aleo/transfer_public_to_private.future;
+    input r1 as u64.public;
+    input r2 as field.public;
+    await r0;
+    get.or_use loan_nullifiers[r2] false into r3;
+    not r3 into r4;
+    assert.eq r4 true;
+    set true into loan_nullifiers[r2];
+    get.or_use pool_liquidity[0u8] 0u64 into r5;
+    get.or_use pool_borrowed[0u8] 0u64 into r6;
+    add r6 r1 into r7;
+    gte r5 r7 into r8;
+    assert.eq r8 true;
+    set r7 into pool_borrowed[0u8];
+    add r5 r1 into r9;
+    set r9 into pool_liquidity[0u8];
+    get.or_use active_loan_count[0u8] 0u32 into r10;
+    add r10 1u32 into r11;
+    set r11 into active_loan_count[0u8];
 
 function repay_loan:
     input r0 as LoanRecord.record;
@@ -300,50 +303,52 @@ function repay_loan:
     add r0.principal r6 into r7;
     gte r1.microcredits r7 into r8;
     assert.eq r8 true;
-    call credits.aleo/transfer_private r1 zerolend_lending_pool_v2.aleo r7 into r9 r10;
+    call credits.aleo/transfer_private_to_public r1 zerolend_lending_pool_v3.aleo r7 into r9 r10;
     add r2.repayments_made 1u32 into r11;
     add r2.total_volume r0.principal into r12;
     call compute_credit_score r2.wallet_age_days r11 r2.defaults r12 into r13;
     call score_to_tier r2.current_score into r14;
     call score_to_tier r13 into r15;
     cast r2.owner r2.wallet_age_days r11 r2.defaults r12 r13 r3 r4 into r16 as CreditRecord.record;
-    async repay_loan r0.principal r6 r14 r15 into r17;
-    output r10 as credits.aleo/credits.record;
+    async repay_loan r10 r0.principal r6 r14 r15 into r17;
+    output r9 as credits.aleo/credits.record;
     output r16 as CreditRecord.record;
-    output r17 as zerolend_lending_pool_v2.aleo/repay_loan.future;
+    output r17 as zerolend_lending_pool_v3.aleo/repay_loan.future;
 
 finalize repay_loan:
-    input r0 as u64.public;
+    input r0 as credits.aleo/transfer_private_to_public.future;
     input r1 as u64.public;
-    input r2 as u8.public;
+    input r2 as u64.public;
     input r3 as u8.public;
-    get pool_borrowed[0u8] into r4;
-    gte r4 r0 into r5;
-    assert.eq r5 true;
-    sub r4 r0 into r6;
-    set r6 into pool_borrowed[0u8];
-    get.or_use pool_interest_earned[0u8] 0u64 into r7;
-    add r7 r1 into r8;
-    set r8 into pool_interest_earned[0u8];
-    get.or_use active_loan_count[0u8] 0u32 into r9;
-    gt r9 0u32 into r10;
-    branch.eq r10 false to end_then_0_2;
-    sub r9 1u32 into r11;
-    set r11 into active_loan_count[0u8];
+    input r4 as u8.public;
+    await r0;
+    get pool_borrowed[0u8] into r5;
+    gte r5 r1 into r6;
+    assert.eq r6 true;
+    sub r5 r1 into r7;
+    set r7 into pool_borrowed[0u8];
+    get.or_use pool_interest_earned[0u8] 0u64 into r8;
+    add r8 r2 into r9;
+    set r9 into pool_interest_earned[0u8];
+    get.or_use active_loan_count[0u8] 0u32 into r10;
+    gt r10 0u32 into r11;
+    branch.eq r11 false to end_then_0_2;
+    sub r10 1u32 into r12;
+    set r12 into active_loan_count[0u8];
     branch.eq true true to end_otherwise_0_3;
     position end_then_0_2;
     position end_otherwise_0_3;
-    get.or_use aggregate_tier_count[r2] 0u32 into r12;
-    gt r12 0u32 into r13;
-    branch.eq r13 false to end_then_0_4;
-    sub r12 1u32 into r14;
-    set r14 into aggregate_tier_count[r2];
+    get.or_use aggregate_tier_count[r3] 0u32 into r13;
+    gt r13 0u32 into r14;
+    branch.eq r14 false to end_then_0_4;
+    sub r13 1u32 into r15;
+    set r15 into aggregate_tier_count[r3];
     branch.eq true true to end_otherwise_0_5;
     position end_then_0_4;
     position end_otherwise_0_5;
-    get.or_use aggregate_tier_count[r3] 0u32 into r15;
-    add r15 1u32 into r16;
-    set r16 into aggregate_tier_count[r3];
+    get.or_use aggregate_tier_count[r4] 0u32 into r16;
+    add r16 1u32 into r17;
+    set r17 into aggregate_tier_count[r4];
 
 function liquidate:
     input r0 as LoanRecord.record;
@@ -361,7 +366,7 @@ function liquidate:
     cast r1.owner r1.wallet_age_days r1.repayments_made r6 r1.total_volume r7 r2 r3 into r10 as CreditRecord.record;
     async liquidate r0.principal r8 r9 into r11;
     output r10 as CreditRecord.record;
-    output r11 as zerolend_lending_pool_v2.aleo/liquidate.future;
+    output r11 as zerolend_lending_pool_v3.aleo/liquidate.future;
 
 finalize liquidate:
     input r0 as u64.public;
@@ -394,7 +399,7 @@ finalize liquidate:
 
 function prove_solvency:
     async prove_solvency into r0;
-    output r0 as zerolend_lending_pool_v2.aleo/prove_solvency.future;
+    output r0 as zerolend_lending_pool_v3.aleo/prove_solvency.future;
 
 finalize prove_solvency:
     get.or_use pool_liquidity[0u8] 0u64 into r0;

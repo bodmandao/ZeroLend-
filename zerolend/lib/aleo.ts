@@ -1,4 +1,4 @@
-export const PROGRAM_ID = 'zerolend_lending_pool_v2.aleo';
+export const PROGRAM_ID = 'zerolend_lending_pool_v3.aleo';
 export const NETWORK    = 'testnet';
 export const API_URL    = 'https://api.explorer.provable.com/v2';
 export const ORG_ID     = '1field';
@@ -12,7 +12,7 @@ export const TIERS = {
   5: { label: 'Excellent', color: '#00d4ff', maxLoan: 5000,  rate: 4,  minScore: 850 },
 };
 
-// ── Score calculation (mirrors Leo logic exactly) ─────────────
+// ── Score calculation ─────────────
 export function computeCreditScore(
   walletAgeDays:  number,
   repaymentsMade: number,
@@ -109,8 +109,6 @@ export async function getCurrentBlockHeight(): Promise<number> {
 }
 
 // ── Transaction execution ─────────────────────────────────────
-// executeHandler  = executeTransaction from useWallet()
-// transactionStatus = transactionStatus from useWallet()
 export interface ExecuteParams {
   programId:    string;
   functionName: string;
@@ -130,14 +128,11 @@ export async function executeTransaction(
 
   console.log('[execute]', programId, functionName, inputs);
 
-  // NOTE: wallet adapter uses `fee` in microcredits (not `priorityFee` in ALEO).
-  // The official SDK's ProgramManager uses `priorityFee` in ALEO — that's only
-  // used server-side in the oracle API route. These are two different APIs.
   const raw = await executeHandler({
     program:     programId,
     function:    functionName,
     inputs,
-    fee,          // microcredits — wallet adapter field name
+    fee,         
     privateFee,
   });
 
@@ -327,9 +322,6 @@ export function buildOracleAttestation(
   ].join(', ');
 }
 
-// ── Fetch record ciphertext from a confirmed transaction ───────
-// outputIndex: which record output to grab (default 0 = first record output)
-// deposit() returns (change_credits[0], LenderDeposit[1]) — pass index=1 for LenderDeposit
 export async function fetchRecordCiphertextFromTx(
   txId:        string,
   outputIndex = 0,
