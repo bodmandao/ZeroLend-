@@ -34,7 +34,6 @@ export default function BorrowPage() {
   const [hydrated, setHydrated]           = useState(false);
   const [dbTierProof, setDbTierProof]     = useState(false);
 
-  // Hydration + DB verification — runs once on wallet connect
   useEffect(() => {
     setHydrated(true);
     if (!connected || !address) return;
@@ -141,7 +140,6 @@ export default function BorrowPage() {
         ],
       }, executeHandler, transactionStatus);
 
-      // Save to DB — no post-tx decrypt needed
       await insertLoan({
         borrower_address: address,
         loan_id_field:    loanId,
