@@ -144,9 +144,9 @@ program zerolend_lending_pool_v3.aleo {
     async function finalize_initialize(admin: address) {
         let existing: address = Mapping::get_or_use(
             protocol_admin, 0u8,
-            aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc
+            aleo1handyyun9zlhv56sgkjc7qp3mg0fsk0d8aqamt49g3sds4nu4urqsudpkf
         );
-        assert_eq(existing, aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc);
+        assert_eq(existing, aleo1handyyun9zlhv56sgkjc7qp3mg0fsk0d8aqamt49g3sds4nu4urqsudpkf);
 
         Mapping::set(protocol_admin,       0u8, admin);
         Mapping::set(pool_liquidity,       0u8, 0u64);
