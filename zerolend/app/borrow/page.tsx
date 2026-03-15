@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   TrendingUp, Shield, AlertTriangle, CheckCircle,
-  ChevronRight, Zap, Clock, DollarSign, Lock, RefreshCw
+  ChevronRight, Zap, Clock, DollarSign, Lock, RefreshCw, ArrowDownLeft
 } from 'lucide-react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { useStore } from '../../lib/store';
@@ -12,9 +12,12 @@ import {
   getTierInfo, randomField, formatAleo, aleoToMicro,
   microToAleo, computeInterest, executeTransaction,
   PROGRAM_ID, TIERS, getCurrentBlockHeight,
-  waitForRecordCiphertext as _unused, fetchPoolStats, scoreToTier,
+  fetchPoolStats, scoreToTier,
 } from '../../lib/aleo';
-import { insertLoan, getExistingAttestation } from '../../lib/supabase';
+import {
+  insertLoan, getExistingAttestation,
+  getActiveLoanByAddress, markLoanRepaid,
+} from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 export default function BorrowPage() {
@@ -24,34 +27,42 @@ export default function BorrowPage() {
     addLoan, addTransaction, poolStats, setPoolStats, setCreditRecord,
   } = useStore();
 
-  const [amount, setAmount]         = useState('');
-  const [step, setStep]             = useState<'idle' | 'requesting' | 'done'>('idle');
-  const [activeLoan, setActiveLoan] = useState<any>(null);
-  const [hydrated, setHydrated]     = useState(false);
-  const [dbTierProof, setDbTierProof] = useState(false);
+  const [amount, setAmount]               = useState('');
+  const [step, setStep]                   = useState<'idle' | 'requesting' | 'repaying' | 'done'>('idle');
+  const [activeLoan, setActiveLoan]       = useState<any>(null);  // just-borrowed loan
+  const [activeLoanFromDb, setActiveLoanFromDb] = useState<any>(null); // existing loan from DB
+  const [hydrated, setHydrated]           = useState(false);
+  const [dbTierProof, setDbTierProof]     = useState(false);
 
+  // Hydration + DB verification — runs once on wallet connect
   useEffect(() => {
     setHydrated(true);
     if (!connected || !address) return;
     (async () => {
       try {
-        const att = await getExistingAttestation(address);
-        if (!att) return;
-        const score = att.computed_score ?? 0;
-        const tier  = scoreToTier(score) as any;
-        if (creditScore === null) {
-          setCreditRecord?.({
-            owner:           address,
-            wallet_age_days: String(att.wallet_age_days),
-            repayments_made: String(att.repayments_made),
-            defaults:        String(att.defaults),
-            total_volume:    String(att.total_volume),
-            current_score:   String(score),
-            last_updated:    '0',
-            nonce:           att.attestation_id,
-          }, score, tier);
+        const [att, loan] = await Promise.all([
+          getExistingAttestation(address),
+          getActiveLoanByAddress(address),
+        ]);
+        if (att) {
+          const score = att.computed_score ?? 0;
+          const tier  = scoreToTier(score) as any;
+          if (creditScore === null) {
+            setCreditRecord?.({
+              owner:           address,
+              wallet_age_days: String(att.wallet_age_days),
+              repayments_made: String(att.repayments_made),
+              defaults:        String(att.defaults),
+              total_volume:    String(att.total_volume),
+              current_score:   String(score),
+              last_updated:    '0',
+              nonce:           att.attestation_id,
+            }, score, tier);
+          }
+          if (att.tier_proof_generated) setDbTierProof(true);
         }
-        if (att.tier_proof_generated) setDbTierProof(true);
+        // If active loan exists, show repayment UI instead of borrow form
+        if (loan) setActiveLoanFromDb(loan);
       } catch { /* DB unavailable */ }
     })();
   }, [connected, address]);
@@ -130,7 +141,7 @@ export default function BorrowPage() {
         ],
       }, executeHandler, transactionStatus);
 
-      // Save to DB
+      // Save to DB — no post-tx decrypt needed
       await insertLoan({
         borrower_address: address,
         loan_id_field:    loanId,
@@ -165,10 +176,75 @@ export default function BorrowPage() {
       });
 
       setActiveLoan({ loan, amtMicro, txId });
+      setActiveLoanFromDb({ ...loan, loan_id_field: loanId, principal: amtMicro });
       toast.success(`Loan of ${formatAleo(amtMicro)} issued!`);
       setStep('done');
     } catch (e: any) {
       toast.error(e.message ?? 'Loan request failed');
+      setStep('idle');
+    }
+  }
+
+  // ── Repay loan ───────────────────────────────────────────────
+  async function handleRepay(loan: any) {
+    if (!address) return;
+    setStep('repaying');
+    try {
+      const currentBlk = await getCurrentBlockHeight();
+
+      // Fetch LoanRecord from wallet
+      const records = await requestRecords?.(PROGRAM_ID, false);
+      const loanRec = (records ?? [])
+        .filter((r: any) => {
+          const isOwner = r.owner === address || r.sender === address;
+          return isOwner && r.recordName === 'LoanRecord' && !r.spent;
+        })
+        .sort((a: any, b: any) => (b.blockHeight ?? 0) - (a.blockHeight ?? 0))[0];
+
+      if (!loanRec) {
+        toast.error('No LoanRecord found in wallet');
+        setStep('idle');
+        return;
+      }
+      const decryptedLoan = await decrypt?.((loanRec as any).recordCiphertext);
+      if (!decryptedLoan) { toast.error('Could not decrypt loan record'); setStep('idle'); return; }
+
+      // Fetch CreditRecord from wallet
+      const creditRec = (records ?? [])
+        .filter((r: any) => {
+          const isOwner = r.owner === address || r.sender === address;
+          return isOwner && r.recordName === 'CreditRecord' && !r.spent;
+        })
+        .sort((a: any, b: any) => (b.blockHeight ?? 0) - (a.blockHeight ?? 0))[0];
+
+      if (!creditRec) { toast.error('No CreditRecord found in wallet'); setStep('idle'); return; }
+      const decryptedCredit = await decrypt?.((creditRec as any).recordCiphertext);
+      if (!decryptedCredit) { toast.error('Could not decrypt credit record'); setStep('idle'); return; }
+
+      // Fetch payment credits record
+      const creditRecords = await requestRecords?.('credits.aleo', false);
+      const paymentRec = (creditRecords ?? [])
+        .filter((r: any) => (r.owner === address || r.sender === address) && r.recordName === 'credits' && !r.spent)
+        .sort((a: any, b: any) => (b.blockHeight ?? 0) - (a.blockHeight ?? 0))[0];
+
+      if (!paymentRec) { toast.error('No credits record found for repayment'); setStep('idle'); return; }
+      const decryptedPayment = await decrypt?.((paymentRec as any).recordCiphertext);
+      if (!decryptedPayment) { toast.error('Could not decrypt credits record'); setStep('idle'); return; }
+
+      const newNonce = randomField();
+      const txId = await executeTransaction({
+        programId:    PROGRAM_ID,
+        functionName: 'repay_loan',
+        inputs: [decryptedLoan, decryptedPayment, decryptedCredit, `${currentBlk}u32`, newNonce],
+      }, executeHandler, transactionStatus);
+
+      await markLoanRepaid(loan.loan_id_field, txId);
+      setActiveLoanFromDb(null);
+      setActiveLoan(null);
+      toast.success('Loan repaid! Your credit score has improved.');
+      setStep('idle');
+    } catch (e: any) {
+      toast.error(e.message ?? 'Repayment failed');
       setStep('idle');
     }
   }
@@ -221,8 +297,66 @@ export default function BorrowPage() {
         </p>
       </div>
 
-      {/* Success state */}
-      {step === 'done' && activeLoan && (
+      {/* Active loan — repayment required before new borrow */}
+      {(activeLoanFromDb || (step === 'done' && activeLoan)) && (
+        <div className="rounded-2xl p-6" style={{
+          background: 'linear-gradient(135deg, rgba(245,158,11,0.1), rgba(239,68,68,0.05))',
+          border: '1px solid rgba(245,158,11,0.3)',
+        }}>
+          <div className="flex items-center gap-3 mb-4">
+            <AlertTriangle size={22} className="text-yellow-400" />
+            <h3 className="text-lg font-bold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
+              Active Loan — Repayment Required
+            </h3>
+          </div>
+          <p className="text-xs text-zero-text-dim mb-4 leading-relaxed">
+            You have an outstanding loan. Repay it before taking a new one.
+            Successful repayment will improve your credit score.
+          </p>
+          {(() => {
+            const loan = activeLoanFromDb ?? activeLoan?.loan;
+            if (!loan) return null;
+            const principal = loan.principal ?? loan.amtMicro ?? 0;
+            const dueBlock  = loan.due_at_block ?? loan.due_block ?? 0;
+            const rateBps   = loan.interest_rate ?? 0;
+            return (
+              <div className="grid grid-cols-3 gap-4 text-sm mb-5">
+                <div>
+                  <p className="text-zero-text-dim text-xs mb-1">Principal</p>
+                  <p className="text-zero-text font-bold" style={{ fontFamily: "'Syne', sans-serif" }}>
+                    {formatAleo(typeof principal === 'string' ? parseInt(principal) : principal)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-zero-text-dim text-xs mb-1">Due Block</p>
+                  <p className="text-zero-text font-mono">{dueBlock.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-zero-text-dim text-xs mb-1">Loan ID</p>
+                  <p className="text-zero-cyan font-mono text-xs truncate">
+                    {(loan.loan_id_field ?? loan.loan_id ?? '').slice(0, 16)}…
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
+          <button
+            onClick={() => handleRepay(activeLoanFromDb ?? activeLoan?.loan)}
+            disabled={step === 'repaying'}
+            className="btn-primary w-full flex items-center justify-center gap-2"
+            style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}
+          >
+            {step === 'repaying' ? (
+              <><div className="zk-loader" style={{ width: 14, height: 14 }} />Repaying…</>
+            ) : (
+              <><ArrowDownLeft size={14} />Repay Loan</>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Success state — new loan just issued */}
+      {step === 'done' && activeLoan && !activeLoanFromDb && (
         <div className="rounded-2xl p-6" style={{
           background: 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(0,212,255,0.05))',
           border: '1px solid rgba(16,185,129,0.3)',
@@ -256,7 +390,7 @@ export default function BorrowPage() {
         </div>
       )}
 
-      <div className="grid lg:grid-cols-5 gap-6">
+      <div className={`grid lg:grid-cols-5 gap-6 ${activeLoanFromDb ? 'opacity-40 pointer-events-none' : ''}`}>
 
         {/* Loan form */}
         <div className="lg:col-span-3 space-y-5">

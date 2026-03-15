@@ -36,12 +36,6 @@ export async function getLoansByAddress(address: string) {
     .order('created_at', { ascending: false });
 }
 
-export async function markLoanRepaid(loanIdField: string, txId: string) {
-  return supabase
-    .from('loans')
-    .update({ status: 'repaid', repaid_tx_id: txId })
-    .eq('loan_id_field', loanIdField);
-}
 
 export async function markLoanLiquidated(loanIdField: string) {
   return supabase
@@ -297,4 +291,26 @@ export async function getTierProofStatus(userAddress: string): Promise<{
     .single();
   if (!data) return null;
   return { generated: data.tier_proof_generated, txId: data.prove_tier_tx_id };
+}
+
+// ── Get active loan for a borrower (one at a time) ────────────
+export async function getActiveLoanByAddress(borrowerAddress: string) {
+  const { data } = await supabase
+    .from('loans')
+    .select('*')
+    .eq('borrower_address', borrowerAddress)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+  return data ?? null;
+}
+ 
+// ── Mark loan as repaid ───────────────────────────────────────
+export async function markLoanRepaid(loanIdField: string, repaidTxId: string) {
+  const { error } = await supabase
+    .from('loans')
+    .update({ status: 'repaid', repaid_tx_id: repaidTxId })
+    .eq('loan_id_field', loanIdField);
+  if (error) console.error('[supabase] markLoanRepaid:', error.message);
 }
