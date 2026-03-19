@@ -66,14 +66,30 @@ mapping aggregate_tier_count:
     key as u8.public;
     value as u32.public;
 
+mapping credit_passport:
+    key as address.public;
+    value as u8.public;
+
+mapping passport_updated_at:
+    key as address.public;
+    value as u32.public;
+
+mapping flash_loan_fees:
+    key as u8.public;
+    value as u64.public;
+
+mapping flash_loan_count:
+    key as u8.public;
+    value as u32.public;
+
 function initialize:
     async initialize self.caller into r0;
     output r0 as zerolend_lending_pool_v3.aleo/initialize.future;
 
 finalize initialize:
     input r0 as address.public;
-    get.or_use protocol_admin[0u8] aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc into r1;
-    assert.eq r1 aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc;
+    get.or_use protocol_admin[0u8] aleo1handyyun9zlhv56sgkjc7qp3mg0fsk0d8aqamt49g3sds4nu4urqsudpkf into r1;
+    assert.eq r1 aleo1handyyun9zlhv56sgkjc7qp3mg0fsk0d8aqamt49g3sds4nu4urqsudpkf;
     set r0 into protocol_admin[0u8];
     set 0u64 into pool_liquidity[0u8];
     set 0u64 into pool_borrowed[0u8];
@@ -406,6 +422,69 @@ finalize prove_solvency:
     get.or_use pool_borrowed[0u8] 0u64 into r1;
     lte r1 r0 into r2;
     assert.eq r2 true;
+
+function flash_loan:
+    input r0 as u64.private;
+    input r1 as field.private;
+    gt r0 0u64 into r2;
+    assert.eq r2 true;
+    mul r0 100u64 into r3;
+    div r3 10000u64 into r4;
+    gt r4 0u64 into r5;
+    ternary r5 r4 1u64 into r6;
+    call credits.aleo/transfer_public_to_private self.caller r0 into r7 r8;
+    async flash_loan r8 r0 r6 r1 into r9;
+    output r7 as credits.aleo/credits.record;
+    output r9 as zerolend_lending_pool_v3.aleo/flash_loan.future;
+
+finalize flash_loan:
+    input r0 as credits.aleo/transfer_public_to_private.future;
+    input r1 as u64.public;
+    input r2 as u64.public;
+    input r3 as field.public;
+    await r0;
+    get.or_use loan_nullifiers[r3] false into r4;
+    not r4 into r5;
+    assert.eq r5 true;
+    set true into loan_nullifiers[r3];
+    get.or_use pool_liquidity[0u8] 0u64 into r6;
+    get.or_use pool_borrowed[0u8] 0u64 into r7;
+    add r7 r1 into r8;
+    gte r6 r8 into r9;
+    assert.eq r9 true;
+    add r6 r2 into r10;
+    set r10 into pool_liquidity[0u8];
+    get.or_use flash_loan_fees[0u8] 0u64 into r11;
+    get.or_use flash_loan_count[0u8] 0u32 into r12;
+    add r11 r2 into r13;
+    set r13 into flash_loan_fees[0u8];
+    add r12 1u32 into r14;
+    set r14 into flash_loan_count[0u8];
+
+function publish_passport:
+    input r0 as CreditRecord.record;
+    input r1 as u32.private;
+    assert.eq r0.owner self.caller;
+    call score_to_tier r0.current_score into r2;
+    cast r0.owner r0.wallet_age_days r0.repayments_made r0.defaults r0.total_volume r0.current_score r0.last_updated r0.nonce into r3 as CreditRecord.record;
+    async publish_passport self.caller r2 r1 into r4;
+    output r3 as CreditRecord.record;
+    output r4 as zerolend_lending_pool_v3.aleo/publish_passport.future;
+
+finalize publish_passport:
+    input r0 as address.public;
+    input r1 as u8.public;
+    input r2 as u32.public;
+    set r1 into credit_passport[r0];
+    set r2 into passport_updated_at[r0];
+
+function revoke_passport:
+    async revoke_passport self.caller into r0;
+    output r0 as zerolend_lending_pool_v3.aleo/revoke_passport.future;
+
+finalize revoke_passport:
+    input r0 as address.public;
+    set 0u8 into credit_passport[r0];
 
 constructor:
     assert.eq edition 0u16;

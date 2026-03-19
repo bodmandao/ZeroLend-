@@ -145,7 +145,7 @@ program zerolend_lending_pool_v3.aleo {
     async constructor() {}
 
     // ================================================================
-    // SECTION 1 — PROTOCOL SETUP
+    // PROTOCOL SETUP
     // ================================================================
 
     async transition initialize() -> Future {
@@ -172,7 +172,7 @@ program zerolend_lending_pool_v3.aleo {
     }
 
     // ================================================================
-    // SECTION 2 — CREDIT ATTESTATION
+    // CREDIT ATTESTATION
     // ================================================================
 
     async transition attest_credit(
@@ -206,7 +206,7 @@ program zerolend_lending_pool_v3.aleo {
     }
 
     // ================================================================
-    // SECTION 3 — TIER PROOF
+    //  TIER PROOF
     // ================================================================
 
     transition prove_tier(
@@ -241,7 +241,7 @@ program zerolend_lending_pool_v3.aleo {
     }
 
     // ================================================================
-    // SECTION 4 — LENDING POOL
+    //  LENDING POOL
     // ================================================================
 
     async transition deposit(
@@ -298,7 +298,7 @@ program zerolend_lending_pool_v3.aleo {
     }
 
     // ================================================================
-    // SECTION 5 — LOAN LIFECYCLE
+    // LOAN LIFECYCLE
     // ================================================================
 
     async transition request_loan(
@@ -471,7 +471,7 @@ program zerolend_lending_pool_v3.aleo {
     }
 
     // ================================================================
-    // SECTION 6 — SOLVENCY PROOF
+    // SOLVENCY PROOF
     // ================================================================
 
     async transition prove_solvency() -> Future {
@@ -485,7 +485,7 @@ program zerolend_lending_pool_v3.aleo {
     }
 
     // ================================================================
-    // SECTION 7 — FLASH LOANS
+    // FLASH LOANS
     // ================================================================
 
     /// Privacy-preserving atomic flash loan.
@@ -533,7 +533,7 @@ program zerolend_lending_pool_v3.aleo {
     }
 
     // ================================================================
-    // SECTION 8 — CREDIT PASSPORT
+    // CREDIT PASSPORT
     // ================================================================
 
     /// Opt in to publish your credit tier publicly on-chain.
