@@ -219,7 +219,7 @@ export default function FlashLoanPage() {
 
             <button
               onClick={handleFlashLoan}
-              disabled={!connected || amtNum <= 0 || step === 'executing' || (poolAvailable !== null && amtNum > poolAvailable)}
+              disabled={!connected || amtNum <= 0 || step === 'executing' || step === 'done' || (poolAvailable !== null && amtNum > poolAvailable)}
               className="btn-primary w-full flex items-center justify-center gap-2"
               style={{ background: step === 'done' ? undefined : 'linear-gradient(135deg, #f59e0b, #ef4444)' }}
             >
@@ -233,17 +233,25 @@ export default function FlashLoanPage() {
             </button>
 
             {lastTxId && (
-              <div className="mt-3 p-3 rounded-xl" style={{ background: 'rgba(0,255,204,0.06)', border: '1px solid rgba(0,255,204,0.15)' }}>
-                <p className="text-xs text-zero-text-dim mb-1">Transaction</p>
-                <a
-                  href={`https://explorer.provable.com/transaction/${lastTxId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs font-mono text-zero-cyan hover:underline break-all"
+              <>
+                <div className="mt-3 p-3 rounded-xl" style={{ background: 'rgba(0,255,204,0.06)', border: '1px solid rgba(0,255,204,0.15)' }}>
+                  <p className="text-xs text-zero-text-dim mb-1">Transaction</p>
+                  <a
+                    href={`https://explorer.provable.com/transaction/${lastTxId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-mono text-zero-cyan hover:underline break-all"
+                  >
+                    {lastTxId}
+                  </a>
+                </div>
+                <button
+                  onClick={() => { setStep('idle'); setAmount(''); setLastTxId(null); }}
+                  className="btn-ghost w-full mt-2 text-sm"
                 >
-                  {lastTxId}
-                </a>
-              </div>
+                  New Flash Loan
+                </button>
+              </>
             )}
           </div>
         </div>
