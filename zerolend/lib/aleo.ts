@@ -184,7 +184,9 @@ export async function fetchMappingValue(
       `${API_URL}/testnet/program/${program}/mapping/${mapping}/${key}`
     );
     if (!res.ok) return null;
-    return await res.json();
+    const raw = await res.json();
+    if (typeof raw === 'string') return raw.replace(/^"|"$/g, '');
+    return String(raw);
   } catch {
     return null;
   }
