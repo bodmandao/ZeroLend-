@@ -24,9 +24,11 @@ async function readPassport(address: string): Promise<{ tier: number; updatedAt:
       fetchMappingValue(PROGRAM_ID, 'credit_passport',     address),
       fetchMappingValue(PROGRAM_ID, 'passport_updated_at', address),
     ]);
-    const tier = parseInt(tierRaw?.replace('u8', '') ?? '0') || 0;
+    if (!tierRaw) return null;
+    // Strip type suffixes: "1u8" → 1, "15179653u32" → 15179653
+    const tier = parseInt(tierRaw.replace(/u\d+$/, '')) || 0;
     if (tier === 0) return null;
-    const updatedAt = parseInt(blockRaw?.replace('u32', '') ?? '0') || 0;
+    const updatedAt = blockRaw ? (parseInt(blockRaw.replace(/u\d+$/, '')) || 0) : 0;
     return { tier, updatedAt };
   } catch {
     return null;
