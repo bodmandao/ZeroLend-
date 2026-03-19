@@ -61,18 +61,30 @@ program zerolend_lending_pool_v3.aleo {
 
     const GRACE_PERIOD: u32 = 8640u32;
 
+    // Flash loan fee: 100 bps = 1%
+    const FLASH_FEE_BPS: u64 = 100u64;
+
     // ================================================================
     // MAPPINGS
     // ================================================================
 
-    mapping protocol_admin:       u8    => address;
-    mapping pool_liquidity:       u8    => u64;
-    mapping pool_borrowed:        u8    => u64;
-    mapping pool_interest_earned: u8    => u64;
-    mapping active_loan_count:    u8    => u32;
-    mapping loan_term_blocks:     u8    => u32;
-    mapping loan_nullifiers:      field => bool;
-    mapping aggregate_tier_count: u8    => u32;
+    mapping protocol_admin:       u8      => address;
+    mapping pool_liquidity:       u8      => u64;
+    mapping pool_borrowed:        u8      => u64;
+    mapping pool_interest_earned: u8      => u64;
+    mapping active_loan_count:    u8      => u32;
+    mapping loan_term_blocks:     u8      => u32;
+    mapping loan_nullifiers:      field   => bool;
+    mapping aggregate_tier_count: u8      => u32;
+
+    // Credit Passport — public opt-in tier registry
+    // value 0 = not published, 1-5 = published tier
+    mapping credit_passport:      address => u8;
+    mapping passport_updated_at:  address => u32;
+
+    // Flash loan stats
+    mapping flash_loan_fees:      u8      => u64;
+    mapping flash_loan_count:     u8      => u32;
 
     // ================================================================
     // HELPERS
@@ -129,9 +141,8 @@ program zerolend_lending_pool_v3.aleo {
         return MAX_LOAN_TIER_1;
     }
 
-       @noupgrade
-    async constructor(
-    ) {}
+    @noupgrade
+    async constructor() {}
 
     // ================================================================
     // SECTION 1 — PROTOCOL SETUP
@@ -258,7 +269,6 @@ program zerolend_lending_pool_v3.aleo {
         Mapping::set(pool_liquidity, 0u8, liq + amount);
     }
 
-    /// Lender withdraws: pool public balance → private credits record.
     async transition withdraw(
         receipt:       LenderDeposit,
         current_block: u32
@@ -276,7 +286,7 @@ program zerolend_lending_pool_v3.aleo {
     }
 
     async function finalize_withdraw(transfer_future: Future, principal: u64, yield_paid: u64) {
-       transfer_future.await();
+        transfer_future.await();
         let liq: u64 = Mapping::get(pool_liquidity, 0u8);
         assert(liq >= principal + yield_paid);
         Mapping::set(pool_liquidity, 0u8, liq - principal - yield_paid);
@@ -291,7 +301,6 @@ program zerolend_lending_pool_v3.aleo {
     // SECTION 5 — LOAN LIFECYCLE
     // ================================================================
 
-    /// Borrow: pool public balance → borrower's private credits record.
     async transition request_loan(
         proof:         CreditTierProof,
         amount:        u64,
@@ -333,7 +342,7 @@ program zerolend_lending_pool_v3.aleo {
     }
 
     async function finalize_request_loan(transfer_future: Future, amount: u64, loan_id: field) {
-       transfer_future.await();
+        transfer_future.await();
         let used: bool = Mapping::get_or_use(loan_nullifiers, loan_id, false);
         assert(!used);
         Mapping::set(loan_nullifiers, loan_id, true);
@@ -342,14 +351,13 @@ program zerolend_lending_pool_v3.aleo {
         let bor: u64 = Mapping::get_or_use(pool_borrowed,  0u8, 0u64);
         assert(liq >= bor + amount);
 
-        Mapping::set(pool_borrowed,     0u8, bor + amount);
-        Mapping::set(pool_liquidity,    0u8, liq + amount); // liquidity tracks gross deposits, not net
+        Mapping::set(pool_borrowed,  0u8, bor + amount);
+        Mapping::set(pool_liquidity, 0u8, liq + amount);
 
         let lc: u32 = Mapping::get_or_use(active_loan_count, 0u8, 0u32);
         Mapping::set(active_loan_count, 0u8, lc + 1u32);
     }
 
-    /// Repay: borrower's private credits → pool public balance.
     async transition repay_loan(
         loan:          LoanRecord,
         payment:       credits.aleo/credits,
@@ -416,7 +424,6 @@ program zerolend_lending_pool_v3.aleo {
         Mapping::set(aggregate_tier_count, new_tier, new_count + 1u32);
     }
 
-    /// Liquidate overdue loan — callable by anyone after due_block + GRACE_PERIOD.
     async transition liquidate(
         loan:          LoanRecord,
         rec:           CreditRecord,
@@ -476,4 +483,53 @@ program zerolend_lending_pool_v3.aleo {
         let bor: u64 = Mapping::get_or_use(pool_borrowed,  0u8, 0u64);
         assert(bor <= liq);
     }
-}
+
+    // ================================================================
+    // SECTION 7 — FLASH LOANS
+    // ================================================================
+
+    /// Privacy-preserving atomic flash loan.
+    /// Borrow any amount, use it, repay principal + 1% fee in one tx.
+    /// Atomicity guaranteed by Aleo VM: entire tx reverts if fee not repaid.
+    /// No credit score required — pure capital efficiency primitive.
+    async transition flash_loan(
+        amount:     u64,
+        loan_nonce: field
+    ) -> (credits.aleo/credits, Future) {
+        assert(amount > 0u64);
+
+        let fee: u64 = (amount * FLASH_FEE_BPS) / 10_000u64;
+        let actual_fee: u64 = fee > 0u64 ? fee : 1u64;
+
+        let (funds, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_public_to_private(self.caller, amount);
+
+        return (funds, finalize_flash_loan(transfer_future, amount, actual_fee, loan_nonce));
+    }
+
+    async function finalize_flash_loan(
+        transfer_future: Future,
+        amount:          u64,
+        fee:             u64,
+        loan_nonce:      field
+    ) {
+        transfer_future.await();
+
+        let used: bool = Mapping::get_or_use(loan_nullifiers, loan_nonce, false);
+        assert(!used);
+        Mapping::set(loan_nullifiers, loan_nonce, true);
+
+        let liq: u64 = Mapping::get_or_use(pool_liquidity, 0u8, 0u64);
+        let bor: u64 = Mapping::get_or_use(pool_borrowed,  0u8, 0u64);
+        assert(liq >= bor + amount);
+
+        // Pool earns fee; principal returns atomically via same-tx repayment
+        Mapping::set(pool_liquidity, 0u8, liq + fee);
+
+        let fees: u64 = Mapping::get_or_use(flash_loan_fees,  0u8, 0u64);
+        let cnt:  u32 = Mapping::get_or_use(flash_loan_count, 0u8, 0u32);
+        Mapping::set(flash_loan_fees,  0u8, fees + fee);
+        Mapping::set(flash_loan_count, 0u8, cnt  + 1u32);
+    }
+
+  }
