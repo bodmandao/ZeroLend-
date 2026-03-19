@@ -1,4 +1,4 @@
-export const PROGRAM_ID = 'zerolend_lending_pool_v3.aleo';
+export const PROGRAM_ID = 'zerolend_lending_pool_v4.aleo';
 export const NETWORK    = 'testnet';
 export const API_URL    = 'https://api.explorer.provable.com/v2';
 export const ORG_ID     = '1field';

@@ -1,6 +1,6 @@
 import credits.aleo;
 
-program zerolend_lending_pool_v3.aleo {
+program zerolend_lending_pool_v4.aleo {
 
     // ================================================================
     // RECORDS
