@@ -15,6 +15,8 @@ const NAV = [
   { href: '/borrow',    icon: TrendingUp,       label: 'Borrow',     desc: 'Request a loan'       },
   { href: '/lend',      icon: Wallet,           label: 'Lend',       desc: 'Earn yield'           },
   { href: '/credit',    icon: ShieldCheck,      label: 'Credit',     desc: 'Your ZK credit score' },
+  {href : '/flashloans', icon: BookOpen,         label: 'Flashloans', desc: 'Instant, no collateral' },
+  {href : '/passport',   icon: Zap,              label: 'Passport',    desc: 'Your on-chain identity' },
   // { href: '/admin',     icon: Settings,         label: 'Admin',      desc: 'Oracle & pool setup'  },
 ];
 
