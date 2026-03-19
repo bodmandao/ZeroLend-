@@ -273,7 +273,17 @@ export default function PassportPage() {
                 className="zero-input flex-1 font-mono text-xs"
                 placeholder="aleo1..."
                 value={lookupAddr}
-                onChange={e => setLookupAddr(e.target.value)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setLookupAddr(val);
+                  // Auto-lookup when a full aleo address is pasted/typed (63 chars)
+                  if (val.startsWith('aleo1') && val.length === 63) {
+                    setLooking(true);
+                    readPassport(val.trim())
+                      .then(result => setLookedUp(result ?? 'not-found'))
+                      .finally(() => setLooking(false));
+                  }
+                }}
                 onKeyDown={e => e.key === 'Enter' && handleLookup()}
               />
               <button
