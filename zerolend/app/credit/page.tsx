@@ -140,6 +140,7 @@ export default function CreditPage() {
         getUserLoanHistory(addr),
       ]);
 
+      console.log('Prefill data:', { ageDays, history });
       const sources: Record<string, 'chain' | 'supabase' | 'new'> = {
         walletAgeDays:  ageDays > 0                          ? 'chain'    : 'new',
         repaymentsMade: history.repaidCount > 0              ? 'supabase' : 'new',
