@@ -532,4 +532,47 @@ program zerolend_lending_pool_v3.aleo {
         Mapping::set(flash_loan_count, 0u8, cnt  + 1u32);
     }
 
-  }
+    // ================================================================
+    // SECTION 8 — CREDIT PASSPORT
+    // ================================================================
+
+    /// Opt in to publish your credit tier publicly on-chain.
+    /// Only tier (1-5) is revealed. Score, history, all raw data stay private.
+    /// Any program or dApp can read credit_passport[address] for instant
+    /// tier verification with no ZK interaction required.
+    async transition publish_passport(
+        rec:           CreditRecord,
+        current_block: u32
+    ) -> (CreditRecord, Future) {
+        assert_eq(rec.owner, self.caller);
+
+        let tier: u8 = score_to_tier(rec.current_score);
+
+        let returned_rec: CreditRecord = CreditRecord {
+            owner:           rec.owner,
+            wallet_age_days: rec.wallet_age_days,
+            repayments_made: rec.repayments_made,
+            defaults:        rec.defaults,
+            total_volume:    rec.total_volume,
+            current_score:   rec.current_score,
+            last_updated:    rec.last_updated,
+            nonce:           rec.nonce,
+        };
+
+        return (returned_rec, finalize_publish_passport(self.caller, tier, current_block));
+    }
+
+    async function finalize_publish_passport(owner: address, tier: u8, current_block: u32) {
+        Mapping::set(credit_passport,     owner, tier);
+        Mapping::set(passport_updated_at, owner, current_block);
+    }
+
+    /// Revoke your public passport — tier returns to 0 (private).
+    async transition revoke_passport() -> Future {
+        return finalize_revoke_passport(self.caller);
+    }
+
+    async function finalize_revoke_passport(owner: address) {
+        Mapping::set(credit_passport, owner, 0u8);
+    }
+}
