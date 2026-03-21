@@ -12,16 +12,27 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "test": "node --experimental-vm-modules node_modules/.bin/jest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
-    "aleo", "zerolend", "credit", "zk", "defi",
-    "passport", "privacy", "lending", "web3"
+    "aleo",
+    "zerolend",
+    "credit",
+    "zk",
+    "defi",
+    "passport",
+    "privacy",
+    "lending",
+    "web3"
   ],
   "author": "ZeroLend",
   "license": "MIT",
@@ -31,9 +42,9 @@
   },
   "homepage": "https://zero-lend-delta.vercel.app/",
   "devDependencies": {
-    "tsup": "^8.0.0",
-    "typescript": "^5.0.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.19.37",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "typescript": ">=4.5.0"

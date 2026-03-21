@@ -72,13 +72,12 @@ async function main() {
   console.log('\n=== ZeroLend Credit SDK — Batch Verification Example ===\n');
 
   // Simulate addresses with various tiers
-  // In production, these would be real wallet addresses
   const addresses = [
-    'aleo1v2a4e9vwfca67vf0vwz2g2gk3mhzqgyptya9d8krgj46duxr9g9sspkul2',
+    'aleo1kgzar3t6sp9ml6yfxw6v2hla320wz5fcrl48fl7eamq7wutqnc8qnhgngy',
     'aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc',
   ];
 
-  // 1. Airdrop calculation
+  // Airdrop calculation
   console.log('1. Airdrop Distribution (base: 100 tokens per tier):');
   console.log('   ─'.repeat(30));
 
@@ -95,7 +94,7 @@ async function main() {
   }
   console.log(`\n   Total tokens distributed: ${totalTokens.toLocaleString()}`);
 
-  // 2. Voting weight
+  // Voting weight
   console.log('\n2. DAO Voting Weights:');
   console.log('   ─'.repeat(30));
 
@@ -111,13 +110,13 @@ async function main() {
   }
   console.log(`\n   Total voting power: ${totalWeight}`);
 
-  // 3. Filter eligible addresses
+  // Filter eligible addresses
   console.log('\n3. Filter — Gold+ only (tier >= 3):');
   const goldEligible = await client.filterByTier(addresses, 3);
   console.log(`   ${goldEligible.length} of ${addresses.length} addresses qualify`);
   goldEligible.forEach(a => console.log(`   ✅ ${a.slice(0, 30)}...`));
 
-  // 4. Tier distribution of sample
+  //  Tier distribution of sample
   console.log('\n4. Sample Tier Distribution:');
   const passports = await client.getPassports(addresses);
   const dist: Record<string, number> = { 'None': 0, Bronze: 0, Silver: 0, Gold: 0, Platinum: 0, Diamond: 0 };
