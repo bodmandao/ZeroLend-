@@ -1,5 +1,5 @@
 {
-  "name": "@zerolend/credit-sdk",
+  "name": "@zerolend-aleo/credit-sdk",
   "version": "1.0.0",
   "description": "ZeroLend Credit Passport SDK — verify Aleo wallet credit tiers with zero raw data exposure",
   "main": "dist/index.js",
