@@ -1,8 +1,8 @@
 'use strict';
 
 // src/index.ts
-var PROGRAM_ID = "zerolend_lending_pool_v3.aleo";
-var DEFAULT_API_URL = "https://api.explorer.provable.com/v1";
+var PROGRAM_ID = "zerolend_lending_pool_v4.aleo";
+var DEFAULT_API_URL = "https://api.explorer.provable.com/v2";
 var TIER_INFO = {
   1: { tier: 1, label: "Bronze", minScore: 0, maxLoanAleo: 10, rateApr: 20, color: "#ef4444" },
   2: { tier: 2, label: "Silver", minScore: 300, maxLoanAleo: 50, rateApr: 15, color: "#f59e0b" },

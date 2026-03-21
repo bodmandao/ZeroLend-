@@ -35,7 +35,7 @@ interface TierCheckResult {
 interface ZeroLendClientOptions {
     /**
      * Aleo API base URL.
-     * @default "https://api.explorer.provable.com/v1"
+     * @default "https://api.explorer.provable.com/v2"
      */
     apiUrl?: string;
     /**
@@ -45,7 +45,7 @@ interface ZeroLendClientOptions {
     network?: 'testnet' | 'mainnet';
     /**
      * Custom ZeroLend program ID (if using a fork or local deployment).
-     * @default "zerolend_lending_pool_v3.aleo"
+     * @default "zerolend_lending_pool_v4.aleo"
      */
     programId?: string;
 }
@@ -62,8 +62,8 @@ interface PoolStats {
     activeLoanCount: number;
     utilizationRate: number;
 }
-declare const PROGRAM_ID = "zerolend_lending_pool_v3.aleo";
-declare const DEFAULT_API_URL = "https://api.explorer.provable.com/v1";
+declare const PROGRAM_ID = "zerolend_lending_pool_v4.aleo";
+declare const DEFAULT_API_URL = "https://api.explorer.provable.com/v2";
 declare const TIER_INFO: Record<CreditTier, TierInfo>;
 declare const MICROCREDITS_PER_ALEO = 1000000;
 declare class ZeroLendClient {

@@ -5,7 +5,7 @@
  */
 
 /** The ZeroLend program ID on Aleo testnet */
-export const ZEROLEND_PROGRAM_ID = 'zerolend_lending_pool_v3.aleo';
+export const ZEROLEND_PROGRAM_ID = 'zerolend_lending_pool_v4.aleo';
 
 /**
  * Leo code snippet: require a minimum tier in your Aleo program.
@@ -20,7 +20,7 @@ export const LEO_REQUIRE_TIER_SNIPPET = `
 // Require Gold tier (3) or higher
 async function finalize_my_function(user: address) {
     let tier: u8 = Mapping::get_or_use(
-        zerolend_lending_pool_v3.aleo/credit_passport,
+        zerolend_lending_pool_v4.aleo/credit_passport,
         user,
         0u8   // default: no passport = tier 0
     );
@@ -43,7 +43,7 @@ export function generateLeoTierCheck(minTier: 1 | 2 | 3 | 4 | 5): string {
 
 async function finalize_your_function(user: address) {
     let tier: u8 = Mapping::get_or_use(
-        zerolend_lending_pool_v3.aleo/credit_passport,
+        zerolend_lending_pool_v4.aleo/credit_passport,
         user,
         0u8
     );
@@ -57,7 +57,7 @@ async function finalize_your_function(user: address) {
  * Replace YOUR_PROGRAM_NAME and the function body as needed.
  */
 export const LEO_PROGRAM_TEMPLATE = `
-import zerolend_lending_pool_v3.aleo;
+import zerolend_lending_pool_v4.aleo;
 
 program your_program.aleo {
 
@@ -74,7 +74,7 @@ program your_program.aleo {
     async function finalize_protected_action(user: address) {
         // Verify Credit Passport directly from ZeroLend's on-chain mapping
         let tier: u8 = Mapping::get_or_use(
-            zerolend_lending_pool_v3.aleo/credit_passport,
+            zerolend_lending_pool_v4.aleo/credit_passport,
             user,
             0u8
         );
