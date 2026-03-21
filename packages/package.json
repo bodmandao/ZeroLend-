@@ -1,0 +1,41 @@
+{
+  "name": "@zerolend/credit-sdk",
+  "version": "1.0.0",
+  "description": "ZeroLend Credit Passport SDK — verify Aleo wallet credit tiers with zero raw data exposure",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "aleo", "zerolend", "credit", "zk", "defi",
+    "passport", "privacy", "lending", "web3"
+  ],
+  "author": "ZeroLend",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zerolend/credit-sdk"
+  },
+  "homepage": "https://zero-lend-delta.vercel.app/",
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  },
+  "peerDependencies": {
+    "typescript": ">=4.5.0"
+  }
+}
