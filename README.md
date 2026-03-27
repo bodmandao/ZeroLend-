@@ -17,7 +17,6 @@
 - [Local Development](#local-development)
 - [Pages & Features](#pages--features)
 - [SDK](#sdk)
-- [Tech Stack](#tech-stack)
 
 ---
 
@@ -265,21 +264,6 @@ const eligible = await client.filterByTier(addresses, 3);
 ```
 
 React hooks, Leo program snippet generators, and Express middleware examples are included. Full documentation at [npmjs.com/package/@zerolend-aleo/credit-sdk](https://npmjs.com/package/@zerolend-aleo/credit-sdk).
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Smart contract | Leo (Aleo) |
-| Frontend framework | Next.js 14, TypeScript |
-| Styling | Tailwind CSS, custom glassmorphism design system |
-| Wallet integration | `@provablehq/aleo-wallet-adaptor-react` |
-| Global state | Zustand (DB-first, localStorage as cache) |
-| Database | Supabase (PostgreSQL) |
-| Aleo network | Testnet via `https://api.explorer.provable.com/v1` |
-| npm package | `@zerolend-aleo/credit-sdk` |
 
 ---
 
