@@ -314,3 +314,46 @@ export async function markLoanRepaid(loanIdField: string, repaidTxId: string) {
     .eq('loan_id_field', loanIdField);
   if (error) console.error('[supabase] markLoanRepaid:', error.message);
 }
+
+export async function savePoolSnapshot(stats: {
+  totalLiquidity:  number;
+  totalBorrowed:   number;
+  interestEarned:  number;
+  activeLoanCount: number;
+  utilizationRate: number;
+}) {
+  const { error } = await supabase.from('pool_snapshots').insert({
+    total_liquidity:  stats.totalLiquidity,
+    total_borrowed:   stats.totalBorrowed,
+    interest_earned:  stats.interestEarned,
+    active_loans:     stats.activeLoanCount,
+    utilization_rate: stats.utilizationRate,
+  });
+  if (error) console.error('[supabase] savePoolSnapshot:', error.message);
+}
+ 
+export async function getPoolSnapshots(limit = 14): Promise<{
+  t:         string;
+  liquidity: number;
+  borrowed:  number;
+}[]> {
+  const { data } = await supabase
+    .from('pool_snapshots')
+    .select('total_liquidity, total_borrowed, created_at')
+    .order('created_at', { ascending: true })
+    .limit(limit);
+ 
+  if (!data?.length) return [];
+ 
+  return data.map((row, i) => {
+    const date = new Date(row.created_at);
+    const label = i === data.length - 1
+      ? 'Now'
+      : `D${i + 1}`;
+    return {
+      t:         label,
+      liquidity: Math.round(row.total_liquidity / 1_000_000),
+      borrowed:  Math.round(row.total_borrowed  / 1_000_000),
+    };
+  });
+}

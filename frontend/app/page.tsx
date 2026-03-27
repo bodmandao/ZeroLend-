@@ -7,35 +7,53 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useStore } from '../lib/store';
-import { fetchPoolStats, formatAleo, TIERS } from '../lib/aleo';
+import { fetchPoolStats, formatAleo, microToAleo, TIERS } from '../lib/aleo';
+import { savePoolSnapshot, getPoolSnapshots } from '../lib/supabase';
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
 
-// Mock chart data — values in ALEO (whole units)
-const MOCK_CHART = [
-  { t: 'D1', liquidity: 50,  borrowed: 10  },
-  { t: 'D2', liquidity: 120, borrowed: 35  },
-  { t: 'D3', liquidity: 210, borrowed: 80  },
-  { t: 'D4', liquidity: 380, borrowed: 140 },
-  { t: 'D5', liquidity: 520, borrowed: 210 },
-  { t: 'D6', liquidity: 740, borrowed: 310 },
-  { t: 'Now', liquidity: 950, borrowed: 420 },
-];
-
 export default function DashboardPage() {
   const { poolStats, setPoolStats, wallet, creditScore } = useStore();
-  const [loading, setLoading] = useState(false);
+  const [loading,      setLoading]      = useState(false);
+  const [chartData,    setChartData]    = useState<{ t: string; liquidity: number; borrowed: number }[]>([]);
+  const [chartLoading, setChartLoading] = useState(true);
 
   async function loadStats() {
     setLoading(true);
     const stats = await fetchPoolStats();
-    if (stats) setPoolStats(stats);
+    if (stats) {
+      setPoolStats(stats);
+      await savePoolSnapshot({
+        totalLiquidity:  stats.totalLiquidity,
+        totalBorrowed:   stats.totalBorrowed,
+        interestEarned:  stats.totalInterestEarned,
+        activeLoanCount: stats.activeLoanCount,
+        utilizationRate: stats.utilizationRate,
+      });
+    }
     setLoading(false);
   }
 
-  useEffect(() => { loadStats(); }, []);
+  async function loadChart() {
+    setChartLoading(true);
+    const snapshots = await getPoolSnapshots(14);
+    setChartData(snapshots);
+    setChartLoading(false);
+  }
+
+  useEffect(() => {
+    loadStats();
+    loadChart();
+  }, []);
+
+  // If no snapshots yet, seed with current stats as a single point
+  const displayChart = chartData.length > 0
+    ? chartData
+    : poolStats
+      ? [{ t: 'Now', liquidity: Math.round(microToAleo(poolStats.totalLiquidity)), borrowed: Math.round(microToAleo(poolStats.totalBorrowed)) }]
+      : [];
 
   const tierData = poolStats
     ? [1, 2, 3, 4, 5].map((t) => ({
@@ -93,7 +111,7 @@ export default function DashboardPage() {
           Protocol Stats
         </h2>
         <button
-          onClick={loadStats}
+          onClick={() => { loadStats(); loadChart(); }}
           disabled={loading}
           className="flex items-center gap-2 text-sm text-zero-text-dim hover:text-zero-cyan transition-colors"
         >
@@ -105,38 +123,30 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           {
-            label:  'Total Liquidity',
-            value:  poolStats ? formatAleo(poolStats.totalLiquidity) : '—',
-            icon:   TrendingUp,
-            color:  '#00d4ff',
-            change: '+12.4%',
-            up:     true,
+            label: 'Total Liquidity',
+            value: poolStats ? formatAleo(poolStats.totalLiquidity) : '—',
+            icon:  TrendingUp,
+            color: '#00d4ff',
           },
           {
-            label:  'Total Borrowed',
-            value:  poolStats ? formatAleo(poolStats.totalBorrowed) : '—',
-            icon:   ArrowUpRight,
-            color:  '#a855f7',
-            change: '+8.1%',
-            up:     true,
+            label: 'Total Borrowed',
+            value: poolStats ? formatAleo(poolStats.totalBorrowed) : '—',
+            icon:  ArrowUpRight,
+            color: '#a855f7',
           },
           {
-            label:  'Active Loans',
-            value:  poolStats?.activeLoanCount ?? '—',
-            icon:   Users,
-            color:  '#10b981',
-            change: '+3',
-            up:     true,
+            label: 'Active Loans',
+            value: poolStats?.activeLoanCount ?? '—',
+            icon:  Users,
+            color: '#10b981',
           },
           {
-            label:  'Utilization',
-            value:  poolStats ? `${utilization}%` : '—',
-            icon:   BarChart2,
-            color:  utilization > 80 ? '#ef4444' : utilization > 60 ? '#f59e0b' : '#10b981',
-            change: utilization > 80 ? 'High' : 'Healthy',
-            up:     utilization <= 80,
+            label: 'Utilization',
+            value: poolStats ? `${utilization}%` : '—',
+            icon:  BarChart2,
+            color: utilization > 80 ? '#ef4444' : utilization > 60 ? '#f59e0b' : '#10b981',
           },
-        ].map(({ label, value, icon: Icon, color, change, up }) => (
+        ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="glass glass-hover rounded-2xl p-5">
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm text-zero-text-dim">{label}</p>
@@ -146,10 +156,6 @@ export default function DashboardPage() {
               </div>
             </div>
             <p className="stat-value text-zero-text">{value}</p>
-            <div className={`flex items-center gap-1 mt-2 text-xs ${up ? 'text-zero-green' : 'text-zero-red'}`}>
-              {up ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-              {change}
-            </div>
           </div>
         ))}
       </div>
@@ -160,47 +166,67 @@ export default function DashboardPage() {
         {/* Pool activity chart */}
         <div className="lg:col-span-2 glass rounded-2xl p-6">
           <div className="flex items-center justify-between mb-6">
-            <h3 className="text-base font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
-              Pool Activity
-            </h3>
+            <div>
+              <h3 className="text-base font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
+                Pool Activity
+              </h3>
+              <p className="text-xs text-zero-text-dim mt-0.5">
+                Snapshots saved on each refresh · Values in ALEO
+              </p>
+            </div>
             <div className="flex items-center gap-4 text-xs text-zero-text-dim">
               <span className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 bg-zero-cyan rounded inline-block" />Liquidity (ALEO)
+                <span className="w-3 h-0.5 bg-zero-cyan rounded inline-block" />Liquidity
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 bg-violet-500 rounded inline-block" />Borrowed (ALEO)
+                <span className="w-3 h-0.5 bg-violet-500 rounded inline-block" />Borrowed
               </span>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={MOCK_CHART}>
-              <defs>
-                <linearGradient id="cyan" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%"   stopColor="#00d4ff" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#00d4ff" stopOpacity={0}   />
-                </linearGradient>
-                <linearGradient id="violet" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%"   stopColor="#a855f7" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#a855f7" stopOpacity={0}   />
-                </linearGradient>
-              </defs>
-              <XAxis dataKey="t" tick={{ fill: '#6b7fa3', fontSize: 12 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: '#6b7fa3', fontSize: 12 }} axisLine={false} tickLine={false} unit=" A" />
-              <Tooltip
-                contentStyle={{ background: '#0c1424', border: '1px solid #1a2540', borderRadius: 12, color: '#c8d6f0' }}
-                formatter={(val: number) => [`${val} ALEO`]}
-              />
-              <Area type="monotone" dataKey="liquidity" stroke="#00d4ff" strokeWidth={2} fill="url(#cyan)"   />
-              <Area type="monotone" dataKey="borrowed"  stroke="#a855f7" strokeWidth={2} fill="url(#violet)" />
-            </AreaChart>
-          </ResponsiveContainer>
+
+          {chartLoading ? (
+            <div className="flex items-center justify-center h-[200px]">
+              <div className="zk-loader" style={{ width: 24, height: 24 }} />
+            </div>
+          ) : displayChart.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-[200px] text-zero-text-dim text-sm">
+              <BarChart2 size={32} className="mb-2 opacity-30" />
+              <p>No history yet — data builds up as the pool is used</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={displayChart}>
+                <defs>
+                  <linearGradient id="cyan" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stopColor="#00d4ff" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="#00d4ff" stopOpacity={0}   />
+                  </linearGradient>
+                  <linearGradient id="violet" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stopColor="#a855f7" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="#a855f7" stopOpacity={0}   />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="t" tick={{ fill: '#6b7fa3', fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: '#6b7fa3', fontSize: 12 }} axisLine={false} tickLine={false} unit=" A" />
+                <Tooltip
+                  contentStyle={{ background: '#0c1424', border: '1px solid #1a2540', borderRadius: 12, color: '#c8d6f0' }}
+                  formatter={(val: number) => [`${val} ALEO`]}
+                />
+                <Area type="monotone" dataKey="liquidity" stroke="#00d4ff" strokeWidth={2} fill="url(#cyan)"   />
+                <Area type="monotone" dataKey="borrowed"  stroke="#a855f7" strokeWidth={2} fill="url(#violet)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
         {/* Tier distribution */}
         <div className="glass rounded-2xl p-6">
-          <h3 className="text-base font-semibold text-zero-text mb-6" style={{ fontFamily: "'Syne', sans-serif" }}>
-            Borrower Tiers
-          </h3>
+          <div>
+            <h3 className="text-base font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
+              Borrower Tiers
+            </h3>
+            <p className="text-xs text-zero-text-dim mt-0.5 mb-6">Live from chain</p>
+          </div>
           {tierData.length > 0 ? (
             <>
               <ResponsiveContainer width="100%" height={140}>
@@ -252,11 +278,9 @@ export default function DashboardPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-zero-green animate-pulse" />
-            <span className="text-sm text-zero-green font-semibold">Solvent</span>
-          </div>
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-zero-green animate-pulse" />
+          <span className="text-sm text-zero-green font-semibold">Solvent</span>
         </div>
       </div>
 
@@ -278,7 +302,7 @@ export default function DashboardPage() {
           {
             icon:  Zap,
             title: 'Zero MEV',
-            desc:  'Private order sizes eliminate front-running and MEV attacks entirely.',
+            desc:  'Private order sizes and flash loan amounts eliminate front-running and MEV attacks entirely.',
             color: '#00ffcc',
           },
         ].map(({ icon: Icon, title, desc, color }) => (
