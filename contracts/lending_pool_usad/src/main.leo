@@ -92,12 +92,12 @@ program zerolend_usad_v1.aleo {
     // HELPERS
     // ================================================================
 
-    function compute_interest(principal: u128, rate_bps: u128, blocks_held: u32) -> u128 {
+    inline compute_interest(principal: u128, rate_bps: u128, blocks_held: u32) -> u128 {
         let blocks: u128 = blocks_held as u128;
         return (principal * rate_bps * blocks) / 10_000_000u128;
     }
 
-    function rate_for_tier(tier: u8) -> u128 {
+    inline rate_for_tier(tier: u8) -> u128 {
         if tier == 5u8 { return RATE_TIER_5; }
         if tier == 4u8 { return RATE_TIER_4; }
         if tier == 3u8 { return RATE_TIER_3; }
@@ -105,7 +105,7 @@ program zerolend_usad_v1.aleo {
         return RATE_TIER_1;
     }
 
-    function max_loan_for_tier(tier: u8) -> u128 {
+    inline max_loan_for_tier(tier: u8) -> u128 {
         if tier == 5u8 { return MAX_LOAN_TIER_5; }
         if tier == 4u8 { return MAX_LOAN_TIER_4; }
         if tier == 3u8 { return MAX_LOAN_TIER_3; }
