@@ -321,7 +321,8 @@ program zerolend_oracle_v1.aleo {
         let finalized: field = Mapping::get(finalized_hash, wallet);
         assert(finalized != 0field);
 
-        let sub_key: field = BHP256::hash_to_field((slot as u64) * 1_000_000_000u64 as field);
+        let slot_field2: field = slot as field;
+        let sub_key: field = slot_field2 * 1_000_000_000field;
         let submitted: field = Mapping::get_or_use(oracle_submissions, sub_key, 0field);
         assert(submitted != 0field);
         assert(submitted != finalized);  // provably wrong submission

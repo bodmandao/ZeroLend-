@@ -1,0 +1,9 @@
+{
+  "program": "zerolend_oracle_v1.aleo",
+  "version": "0.1.0",
+  "description": "",
+  "license": "",
+  "leo": "3.4.0",
+  "dependencies": null,
+  "dev_dependencies": null
+}
