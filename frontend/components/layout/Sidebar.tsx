@@ -4,20 +4,22 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, TrendingUp, Wallet, ShieldCheck,
-  Settings, BookOpen, Zap, ChevronRight
+  BookOpen, Zap, ChevronRight, Users, Cpu, Vote,
 } from 'lucide-react';
 import { useStore } from '../../lib/store';
 import clsx from 'clsx';
 import { useState } from 'react';
 
 const NAV = [
-  { href: '/',          icon: LayoutDashboard, label: 'Dashboard',  desc: 'Overview & stats'     },
-  { href: '/borrow',    icon: TrendingUp,       label: 'Borrow',     desc: 'Request a loan'       },
-  { href: '/lend',      icon: Wallet,           label: 'Lend',       desc: 'Earn yield'           },
-  { href: '/credit',    icon: ShieldCheck,      label: 'Credit',     desc: 'Your ZK credit score' },
-  {href : '/flashloans', icon: BookOpen,         label: 'Flashloans', desc: 'Instant, no collateral' },
-  {href : '/passport',   icon: Zap,              label: 'Passport',    desc: 'Your on-chain identity' },
-  // { href: '/admin',     icon: Settings,         label: 'Admin',      desc: 'Oracle & pool setup'  },
+  { href: '/',           icon: LayoutDashboard, label: 'Dashboard',  desc: 'Overview & stats'        },
+  { href: '/borrow',     icon: TrendingUp,      label: 'Borrow',     desc: 'Request a loan'          },
+  { href: '/lend',       icon: Wallet,          label: 'Lend',       desc: 'Earn yield'              },
+  { href: '/credit',     icon: ShieldCheck,     label: 'Credit',     desc: 'Your ZK credit score'    },
+  { href: '/flashloans', icon: BookOpen,        label: 'Flash Loans',desc: 'Instant, no collateral'  },
+  { href: '/passport',   icon: Zap,             label: 'Passport',   desc: 'Your on-chain identity'  },
+  { href: '/oracle',     icon: Cpu,             label: 'Oracle',     desc: '2-of-3 verified credit'  },
+  { href: '/vouching',   icon: Users,           label: 'Vouching',   desc: 'Stake for tier boosts'   },
+  { href: '/governance', icon: Vote,            label: 'Governance', desc: 'Credit-weighted voting'  },
 ];
 
 export default function Sidebar() {

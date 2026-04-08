@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useStore } from '../lib/store';
-import { fetchPoolStats, formatAleo, microToAleo, TIERS } from '../lib/aleo';
+import { fetchPoolStats, formatAleo, formatPoolAmount, microToAleo, TIERS, type TokenPool } from '../lib/aleo';
 import { savePoolSnapshot, getPoolSnapshots } from '../lib/supabase';
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip,
@@ -19,10 +19,11 @@ export default function DashboardPage() {
   const [loading,      setLoading]      = useState(false);
   const [chartData,    setChartData]    = useState<{ t: string; liquidity: number; borrowed: number }[]>([]);
   const [chartLoading, setChartLoading] = useState(true);
+  const [activePool,   setActivePool]   = useState<TokenPool>('aleo');
 
   async function loadStats() {
     setLoading(true);
-    const stats = await fetchPoolStats();
+    const stats = await fetchPoolStats(activePool);
     if (stats) {
       setPoolStats(stats);
       await savePoolSnapshot({
@@ -46,7 +47,7 @@ export default function DashboardPage() {
   useEffect(() => {
     loadStats();
     loadChart();
-  }, []);
+  }, [activePool]);
 
   // If no snapshots yet, seed with current stats as a single point
   const displayChart = chartData.length > 0
@@ -106,31 +107,50 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Pool stats ──────────────────────────────────── */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <h2 className="text-xl font-bold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
           Protocol Stats
         </h2>
-        <button
-          onClick={() => { loadStats(); loadChart(); }}
-          disabled={loading}
-          className="flex items-center gap-2 text-sm text-zero-text-dim hover:text-zero-cyan transition-colors"
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Pool selector */}
+          <div className="flex items-center gap-1 rounded-xl p-1" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            {(['aleo', 'usdcx', 'usad'] as TokenPool[]).map(pool => (
+              <button
+                key={pool}
+                onClick={() => setActivePool(pool)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                style={{
+                  background: activePool === pool ? 'rgba(0,212,255,0.15)' : 'transparent',
+                  color:      activePool === pool ? '#00d4ff' : '#6b7fa3',
+                  border:     activePool === pool ? '1px solid rgba(0,212,255,0.3)' : '1px solid transparent',
+                }}
+              >
+                {pool === 'aleo' ? 'ALEO' : pool === 'usdcx' ? 'USDCx' : 'USAD'}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => { loadStats(); loadChart(); }}
+            disabled={loading}
+            className="flex items-center gap-2 text-sm text-zero-text-dim hover:text-zero-cyan transition-colors"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           {
             label: 'Total Liquidity',
-            value: poolStats ? formatAleo(poolStats.totalLiquidity) : '—',
+            value: poolStats ? formatPoolAmount(poolStats.totalLiquidity, activePool) : '—',
             icon:  TrendingUp,
             color: '#00d4ff',
           },
           {
             label: 'Total Borrowed',
-            value: poolStats ? formatAleo(poolStats.totalBorrowed) : '—',
+            value: poolStats ? formatPoolAmount(poolStats.totalBorrowed, activePool) : '—',
             icon:  ArrowUpRight,
             color: '#a855f7',
           },

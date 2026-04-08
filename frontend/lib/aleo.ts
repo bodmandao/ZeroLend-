@@ -1,7 +1,38 @@
-export const PROGRAM_ID = 'zerolend_lending_pool_v4.aleo';
+export const PROGRAM_ID            = 'zerolend_lending_pool_v4.aleo';
+export const PROGRAM_ID_USDCX      = 'zerolend_usdcx_v1.aleo';
+export const PROGRAM_ID_USAD       = 'zerolend_usad_v1.aleo';
+export const PROGRAM_ID_ORACLE     = 'zerolend_oracle_v1.aleo';
+export const PROGRAM_ID_VOUCHING   = 'zerolend_vouching_v1.aleo';
+export const PROGRAM_ID_GOVERNANCE = 'zerolend_governance_v1.aleo';
 export const NETWORK    = 'testnet';
 export const API_URL    = 'https://api.explorer.provable.com/v2';
 export const ORG_ID     = '1field';
+
+export type TokenPool = 'aleo' | 'usdcx' | 'usad';
+
+export const POOL_PROGRAMS: Record<TokenPool, string> = {
+  aleo:  PROGRAM_ID,
+  usdcx: PROGRAM_ID_USDCX,
+  usad:  PROGRAM_ID_USAD,
+};
+
+export const POOL_LABELS: Record<TokenPool, string> = {
+  aleo:  'ALEO',
+  usdcx: 'USDCx',
+  usad:  'USAD',
+};
+
+export const POOL_DECIMALS: Record<TokenPool, number> = {
+  aleo:  1_000_000,
+  usdcx: 1_000_000,
+  usad:  1_000_000,
+};
+
+export function formatPoolAmount(base: number, pool: TokenPool): string {
+  const val = base / POOL_DECIMALS[pool];
+  const unit = POOL_LABELS[pool];
+  return `${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${unit}`;
+}
 
 // ── Tier definitions ──────────────────────────────────────────
 export const TIERS = {
@@ -193,20 +224,22 @@ export async function fetchMappingValue(
 }
 
 // ── Pool stats ────────────────────────────────────────────────
-export async function fetchPoolStats() {
+export async function fetchPoolStats(pool: TokenPool = 'aleo') {
   try {
+    const programId = POOL_PROGRAMS[pool];
     const [liquidity, borrowed, interestEarned, loanCount] = await Promise.all([
-      fetchMappingValue(PROGRAM_ID, 'pool_liquidity',       '0u8'),
-      fetchMappingValue(PROGRAM_ID, 'pool_borrowed',        '0u8'),
-      fetchMappingValue(PROGRAM_ID, 'pool_interest_earned', '0u8'),
-      fetchMappingValue(PROGRAM_ID, 'active_loan_count',    '0u8'),
+      fetchMappingValue(programId, 'pool_liquidity',       '0u8'),
+      fetchMappingValue(programId, 'pool_borrowed',        '0u8'),
+      fetchMappingValue(programId, 'pool_interest_earned', '0u8'),
+      fetchMappingValue(programId, 'active_loan_count',    '0u8'),
     ]);
 
-    const tierCounts = await Promise.all(
-      [1, 2, 3, 4, 5].map(t =>
-        fetchMappingValue(PROGRAM_ID, 'aggregate_tier_count', `${t}u8`)
-      )
-    );
+    // Tier counts only on the main ALEO contract
+    const tierCounts = pool === 'aleo'
+      ? await Promise.all([1, 2, 3, 4, 5].map(t =>
+          fetchMappingValue(PROGRAM_ID, 'aggregate_tier_count', `${t}u8`)
+        ))
+      : ['0', '0', '0', '0', '0'];
 
     const liq = parseInt(liquidity ?? '0');
     const bor = parseInt(borrowed  ?? '0');
@@ -226,6 +259,65 @@ export async function fetchPoolStats() {
   } catch {
     return null;
   }
+}
+
+export async function fetchAllPoolStats() {
+  const [aleo, usdcx, usad] = await Promise.all([
+    fetchPoolStats('aleo'),
+    fetchPoolStats('usdcx'),
+    fetchPoolStats('usad'),
+  ]);
+  return { aleo, usdcx, usad };
+}
+
+// ── Oracle status ─────────────────────────────────────────────
+export async function fetchOracleSlots() {
+  const slots = [0, 1, 2];
+  return Promise.all(slots.map(async (slot) => {
+    const [addr, slashes] = await Promise.all([
+      fetchMappingValue(PROGRAM_ID_ORACLE, 'oracle_registry', `${slot}u8`),
+      fetchMappingValue(PROGRAM_ID_ORACLE, 'slash_count',     `${slot}u8`),
+    ]);
+    return { slot, address: addr, slashCount: parseInt(slashes ?? '0') };
+  }));
+}
+
+export async function fetchIsOracleVerified(address: string): Promise<boolean> {
+  const raw = await fetchMappingValue(PROGRAM_ID_ORACLE, 'finalized_hash', address);
+  return raw !== null && raw !== '0field';
+}
+
+// ── Vouching ──────────────────────────────────────────────────
+export async function fetchVouchBoost(borrower: string): Promise<number> {
+  const raw = await fetchMappingValue(PROGRAM_ID_VOUCHING, 'vouch_boost', borrower);
+  return parseInt(raw ?? '0');
+}
+
+export async function fetchVouchesOut(voucher: string): Promise<number> {
+  const raw = await fetchMappingValue(PROGRAM_ID_VOUCHING, 'vouches_out', voucher);
+  return parseInt(raw ?? '0');
+}
+
+export async function fetchTotalStaked(voucher: string): Promise<number> {
+  const raw = await fetchMappingValue(PROGRAM_ID_VOUCHING, 'total_staked', voucher);
+  return parseInt(raw ?? '0');
+}
+
+// ── Governance ────────────────────────────────────────────────
+export async function fetchGovernanceStats() {
+  const [proposalCount, totalStaked] = await Promise.all([
+    fetchMappingValue(PROGRAM_ID_GOVERNANCE, 'proposal_count', '0u8'),
+    fetchMappingValue(PROGRAM_ID_GOVERNANCE, 'total_staked',   '0u8'),
+  ]);
+  return {
+    proposalCount: parseInt(proposalCount ?? '0'),
+    totalStaked:   parseInt(totalStaked   ?? '0'),
+  };
+}
+
+export async function fetchGovernanceStake(address: string): Promise<number> {
+  const raw = await fetchMappingValue(PROGRAM_ID_GOVERNANCE, 'staked_balance', address);
+  return parseInt(raw ?? '0');
 }
 
 // ── Leo record string builders ────────────────────────────────
