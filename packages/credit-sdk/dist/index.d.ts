@@ -1,12 +1,18 @@
 /** Credit tier levels (1 = Bronze … 5 = Diamond) */
 type CreditTier = 1 | 2 | 3 | 4 | 5;
+/** Supported lending pools */
+type TokenPool = 'aleo' | 'usdcx' | 'usad';
 /** Human-readable tier metadata */
 interface TierInfo {
     tier: CreditTier;
     label: 'Bronze' | 'Silver' | 'Gold' | 'Platinum' | 'Diamond';
     minScore: number;
     maxLoanAleo: number;
+    maxLoanUsdcx: number;
+    maxLoanUsad: number;
     rateApr: number;
+    rateAprUsdcx: number;
+    rateAprUsad: number;
     color: string;
 }
 /** A published Credit Passport entry read from chain */
@@ -44,10 +50,14 @@ interface ZeroLendClientOptions {
      */
     network?: 'testnet' | 'mainnet';
     /**
-     * Custom ZeroLend program ID (if using a fork or local deployment).
-     * @default "zerolend_lending_pool_v4.aleo"
+     * Override program IDs for any pool.
+     * Defaults to the canonical deployed program IDs.
      */
-    programId?: string;
+    programIds?: {
+        aleo?: string;
+        usdcx?: string;
+        usad?: string;
+    };
 }
 /** Flash loan statistics from chain */
 interface FlashLoanStats {
@@ -62,15 +72,47 @@ interface PoolStats {
     activeLoanCount: number;
     utilizationRate: number;
 }
+/** Oracle status for a single slot */
+interface OracleSlot {
+    slot: number;
+    address: string | null;
+    slashCount: number;
+}
+/** Active vouch details */
+interface VouchInfo {
+    voucher: string;
+    borrower: string;
+    staked: number;
+    issuedBlock: number;
+    boostedTier: number;
+}
+/** Governance proposal summary */
+interface ProposalSummary {
+    id: string;
+    proposer: string;
+    startBlock: number;
+    endBlock: number;
+    yesWeight: number;
+    noWeight: number;
+    executed: boolean;
+}
 declare const PROGRAM_ID = "zerolend_lending_pool_v4.aleo";
+declare const PROGRAM_ID_USDCX = "zerolend_usdcx_v1.aleo";
+declare const PROGRAM_ID_USAD = "zerolend_usad_v1.aleo";
+declare const USDCX_TOKEN_PROGRAM = "test_usdcx_stablecoin.aleo";
+declare const USAD_TOKEN_PROGRAM = "test_usad_stablecoin.aleo";
+declare const PROGRAM_ID_ORACLE = "zerolend_oracle_v1.aleo";
+declare const PROGRAM_ID_VOUCHING = "zerolend_vouching_v1.aleo";
+declare const PROGRAM_ID_GOVERNANCE = "zerolend_governance_v1.aleo";
 declare const DEFAULT_API_URL = "https://api.explorer.provable.com/v2";
 declare const TIER_INFO: Record<CreditTier, TierInfo>;
 declare const MICROCREDITS_PER_ALEO = 1000000;
 declare class ZeroLendClient {
     private apiUrl;
     private network;
-    private programId;
+    private programIds;
     constructor(options?: ZeroLendClientOptions);
+    private fetchMappingFromProgram;
     private fetchMapping;
     private parseU8;
     private parseU32;
@@ -119,20 +161,77 @@ declare class ZeroLendClient {
     /**
      * Fetch current pool statistics from chain.
      *
+     * @param pool - Which pool to query: 'aleo' (default), 'usdcx', or 'usad'
+     *
      * @example
-     * const stats = await client.getPoolStats();
-     * console.log(`Utilization: ${stats.utilizationRate}%`);
+     * const aleoStats  = await client.getPoolStats('aleo');
+     * const usdcxStats = await client.getPoolStats('usdcx');
+     * console.log(`ALEO utilization: ${aleoStats.utilizationRate}%`);
      */
-    getPoolStats(): Promise<PoolStats>;
+    getPoolStats(pool?: TokenPool): Promise<PoolStats>;
     /**
      * Fetch flash loan statistics from chain.
+     *
+     * @param pool - Which pool to query: 'aleo' (default), 'usdcx', or 'usad'
      */
-    getFlashLoanStats(): Promise<FlashLoanStats>;
+    getFlashLoanStats(pool?: TokenPool): Promise<FlashLoanStats>;
+    /**
+     * Fetch stats for all three pools in parallel.
+     *
+     * @example
+     * const { aleo, usdcx, usad } = await client.getAllPoolStats();
+     */
+    getAllPoolStats(): Promise<Record<TokenPool, PoolStats>>;
+    /**
+     * Fetch flash loan stats for all three pools in parallel.
+     */
+    getAllFlashLoanStats(): Promise<Record<TokenPool, FlashLoanStats>>;
     /**
      * Fetch tier distribution across all attested wallets.
      * Returns a map of tier → count of wallets in that tier.
+     * Note: tier distribution is tracked on the ALEO (main) contract only.
      */
     getTierDistribution(): Promise<Record<CreditTier, number>>;
+    /**
+     * Get the status of all three oracle slots.
+     * Returns registered address and slash count per slot.
+     */
+    getOracleSlots(): Promise<OracleSlot[]>;
+    /**
+     * Check whether an oracle consensus has been reached for a wallet.
+     * Returns true if finalized_hash is non-zero for that address.
+     */
+    isOracleVerified(address: string): Promise<boolean>;
+    /**
+     * Get the active tier boost for a borrower from the vouching contract.
+     * Returns 0 if no active vouch.
+     */
+    getVouchBoost(borrower: string): Promise<number>;
+    /**
+     * Get the effective (boosted) tier for an address.
+     * Combines passport tier + any active vouch boost.
+     */
+    getEffectiveTier(address: string): Promise<CreditTier | null>;
+    /**
+     * Get the number of active outbound vouches for a voucher address.
+     */
+    getVouchesOut(voucher: string): Promise<number>;
+    /**
+     * Get the total ALEO staked by a voucher across all active vouches.
+     */
+    getTotalStaked(voucher: string): Promise<number>;
+    /**
+     * Get the total number of proposals submitted.
+     */
+    getProposalCount(): Promise<number>;
+    /**
+     * Get the total governance stake across all participants.
+     */
+    getGovernanceTotalStaked(): Promise<number>;
+    /**
+     * Get the governance stake for a specific address.
+     */
+    getGovernanceStake(address: string): Promise<number>;
 }
 /**
  * Get human-readable info for a tier level.
@@ -178,9 +277,38 @@ declare function aprForTier(tier: CreditTier): number;
 declare function computeInterest(principal: number, rateBps: number, blocksHeld: number): number;
 /**
  * Compute flash loan fee for a given amount.
- * @param amount - Loan amount in microcredits
- * @returns fee in microcredits (1% of amount, minimum 1)
+ * @param amount - Loan amount in base units
+ * @param pool   - 'aleo' = 1% fee, 'usdcx' = 0.3% fee, 'usad' = 0.5% fee
+ * @returns fee in base units (minimum 1)
  */
-declare function flashLoanFee(amount: number): number;
+declare function flashLoanFee(amount: number, pool?: TokenPool): number;
+/**
+ * Get the max loan amount for a given tier and pool.
+ *
+ * @param tier - Credit tier (1-5)
+ * @param pool - 'aleo' returns ALEO amount, 'usdcx'/'usad' return USD amount
+ *
+ * @example
+ * maxLoanForPool(3, 'usdcx') // → 200  ($200 in USDCx)
+ * maxLoanForPool(3, 'aleo')  // → 200  (200 ALEO)
+ */
+declare function maxLoanForPool(tier: CreditTier, pool: TokenPool): number;
+/**
+ * Get the annual interest rate (%) for a given tier and pool.
+ *
+ * @example
+ * aprForPool(5, 'usdcx') // → 3  (3% for Diamond tier in USDCx pool)
+ */
+declare function aprForPool(tier: CreditTier, pool: TokenPool): number;
+/**
+ * Convert a stablecoin amount (whole units) to base units (6 decimals).
+ * @example usdToBase(10) // → 10_000_000
+ */
+declare function usdToBase(amount: number): number;
+/**
+ * Convert stablecoin base units to whole USD value.
+ * @example baseToUsd(10_000_000) // → 10
+ */
+declare function baseToUsd(base: number): number;
 
-export { type CreditPassport, type CreditTier, DEFAULT_API_URL, type FlashLoanStats, MICROCREDITS_PER_ALEO, PROGRAM_ID, type PoolStats, TIER_INFO, type TierCheckResult, type TierInfo, ZeroLendClient, type ZeroLendClientOptions, aleoToMicro, aprForTier, computeInterest, flashLoanFee, getTierInfo, isValidAleoAddress, maxLoanForTier, microToAleo };
+export { type CreditPassport, type CreditTier, DEFAULT_API_URL, type FlashLoanStats, MICROCREDITS_PER_ALEO, type OracleSlot, PROGRAM_ID, PROGRAM_ID_GOVERNANCE, PROGRAM_ID_ORACLE, PROGRAM_ID_USAD, PROGRAM_ID_USDCX, PROGRAM_ID_VOUCHING, type PoolStats, type ProposalSummary, TIER_INFO, type TierCheckResult, type TierInfo, type TokenPool, USAD_TOKEN_PROGRAM, USDCX_TOKEN_PROGRAM, type VouchInfo, ZeroLendClient, type ZeroLendClientOptions, aleoToMicro, aprForPool, aprForTier, baseToUsd, computeInterest, flashLoanFee, getTierInfo, isValidAleoAddress, maxLoanForPool, maxLoanForTier, microToAleo, usdToBase };
