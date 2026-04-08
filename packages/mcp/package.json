@@ -6,19 +6,30 @@
   "bin": {
     "zerolend-mcp": "dist/index.js"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup src/index.ts --format cjs --dts --clean",
     "dev": "tsup src/index.ts --format cjs --watch",
     "start": "node dist/index.js"
   },
-  "keywords": ["mcp", "aleo", "zerolend", "credit", "defi", "zero-knowledge"],
+  "keywords": [
+    "mcp",
+    "aleo",
+    "zerolend",
+    "credit",
+    "defi",
+    "zero-knowledge"
+  ],
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@zerolend-aleo/credit-sdk": "*"
   },
   "devDependencies": {
+    "@types/node": "^25.5.2",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   }
