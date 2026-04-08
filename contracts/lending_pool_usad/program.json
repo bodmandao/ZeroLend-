@@ -1,0 +1,22 @@
+{
+  "program": "zerolend_usad_v1.aleo",
+  "version": "0.1.0",
+  "description": "ZeroLend USAD lending pool — credit-gated undercollateralized borrowing in USAD",
+  "license": "MIT",
+  "leo": "3.4.0",
+  "dependencies": [
+    {
+      "name": "test_usad_stablecoin.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    },
+    {
+      "name": "zerolend_lending_pool_v4.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    }
+  ],
+  "dev_dependencies": null
+}
