@@ -1,15 +1,20 @@
+// ================================================================
+// ZeroLend — Governance Contract
+// Program: zerolend_governance_v2.aleo
+//
 // Credit-weighted governance: voting power = tier level * staked ALEO.
 // Diamond tier = 5x base weight. Proposals can change protocol params:
 // tier thresholds, interest rates, flash loan fees, oracle operators.
 //
 // Ballots are private records — no one sees how you voted until
 // the tally is finalized. Only the final count is on-chain.
+// ================================================================
 
 import credits.aleo;
-import zerolend_lending_pool_v4.aleo;
+import zerolend_lending_pool_v5.aleo;
 
 // ================================================================
-// STRUCTS 
+// STRUCTS (module-level)
 // ================================================================
 
 struct ProposalContent {
@@ -36,7 +41,7 @@ fn voter_key(voter: address, prop_id: field) -> field {
     return BHP256::hash_to_field(voter) + prop_id;
 }
 
-program zerolend_governance_v1.aleo {
+program zerolend_governance_v2.aleo {
 
     // ================================================================
     // RECORDS
@@ -139,7 +144,7 @@ program zerolend_governance_v1.aleo {
 
         return (change, receipt, final {
             transfer_future.run();
-            let tier: u8 = zerolend_lending_pool_v4.aleo::credit_passport.get_or_use(staker, 0u8);
+            let tier: u8 = zerolend_lending_pool_v5.aleo::credit_passport.get_or_use(staker, 0u8);
             assert(tier >= 1u8);
 
             let bal: u64 = staked_balance.get_or_use(staker, 0u64);
@@ -191,7 +196,7 @@ program zerolend_governance_v1.aleo {
         };
         let proposer: address = self.caller;
         return final {
-            let tier: u8 = zerolend_lending_pool_v4.aleo::credit_passport.get_or_use(proposer, 0u8);
+            let tier: u8 = zerolend_lending_pool_v5.aleo::credit_passport.get_or_use(proposer, 0u8);
             assert(tier >= 3u8);
 
             let bal: u64 = staked_balance.get_or_use(proposer, 0u64);
@@ -241,7 +246,7 @@ program zerolend_governance_v1.aleo {
             assert(!voted);
             has_voted.set(vkey, true);
 
-            let tier:   u8  = zerolend_lending_pool_v4.aleo::credit_passport.get_or_use(voter, 0u8);
+            let tier:   u8  = zerolend_lending_pool_v5.aleo::credit_passport.get_or_use(voter, 0u8);
             assert(tier >= 1u8);
             let staked: u64 = staked_balance.get_or_use(voter, 0u64);
             assert(staked >= MIN_STAKE);

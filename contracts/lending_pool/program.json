@@ -1,14 +1,20 @@
 {
-  "program": "zerolend_lending_pool_v4.aleo",
-  "version": "0.1.0",
+  "program": "zerolend_lending_pool_v5.aleo",
+  "version": "0.2.0",
   "description": "",
   "license": "MIT",
-  "leo": "3.4.0",
+  "leo": "4.0.0",
   "dependencies": [
     {
       "name": "credits.aleo",
       "location": "network",
       "path": null,
+      "edition": null
+    },
+    {
+      "name": "zerolend_oracle_v2.aleo",
+      "location": "local",
+      "path": "../oracle",
       "edition": null
     }
   ],

@@ -1,4 +1,7 @@
+// ================================================================
 // ZeroLend — USAD Lending Pool
+// Program: zerolend_usad_v2.aleo
+//
 // Token: test_usad_stablecoin.aleo
 //   Token record:       { owner: address, amount: u128 }
 //   MerkleProof struct: { siblings: [field; 16], leaf_index: u32 }
@@ -7,10 +10,11 @@
 // specific program import and slightly higher rates (Aleo-native
 // stablecoin liquidity premium).
 //
-// Credit tier read from credit_passport in zerolend_lending_pool_v4.aleo.
+// Credit tier read from credit_passport in zerolend_lending_pool_v5.aleo.
+// ================================================================
 
 import test_usad_stablecoin.aleo;
-import zerolend_lending_pool_v4.aleo;
+import zerolend_lending_pool_v5.aleo;
 
 // ================================================================
 // HELPERS
@@ -37,7 +41,7 @@ fn max_loan_for_tier(tier: u8) -> u128 {
     return 10_000_000u128;                          // MAX_LOAN_TIER_1
 }
 
-program zerolend_usad_v1.aleo {
+program zerolend_usad_v2.aleo {
 
     // ================================================================
     // RECORDS
@@ -61,14 +65,7 @@ program zerolend_usad_v1.aleo {
         nonce:          field,
     }
 
-    record UsadFlashBond {
-        owner:     address,
-        amount:    u128,
-        fee:       u128,
-        issued_at: u32,
-        expiry:    u32,
-        nonce:     field,
-    }
+    // UsadFlashBond removed — flash loans now atomic (single fn)
 
     // ================================================================
     // CONSTANTS
@@ -76,14 +73,12 @@ program zerolend_usad_v1.aleo {
     // ================================================================
 
     // Gold-tier rate used for deposit yield calculation
-    const RATE_TIER_3:         u128 = 950u128;
+    const RATE_TIER_3:    u128 = 950u128;
 
     // Flash loan fee: 50 bps = 0.5%
-    const FLASH_FEE_BPS:       u128 = 50u128;
+    const FLASH_FEE_BPS:  u128 = 50u128;
 
-    const FLASH_EXPIRY_BLOCKS: u32  = 100u32;
-    const FLASH_MIN_TIER:      u8   = 3u8;
-    const GRACE_PERIOD:        u32  = 8640u32;
+    const GRACE_PERIOD:   u32  = 8640u32;
 
     // ================================================================
     // MAPPINGS
@@ -96,7 +91,6 @@ program zerolend_usad_v1.aleo {
     mapping active_loan_count:    u8    => u32;
     mapping loan_term_blocks:     u8    => u32;
     mapping loan_nullifiers:      field => bool;
-    mapping pending_flash:        field => u128;
     mapping flash_loan_fees:      u8    => u128;
     mapping flash_loan_count:     u8    => u32;
 
@@ -239,7 +233,7 @@ program zerolend_usad_v1.aleo {
         return (loan, compliance, loan_funds, final {
             transfer_future.run();
 
-            let tier: u8 = zerolend_lending_pool_v4.aleo::credit_passport.get_or_use(caller, 0u8);
+            let tier: u8 = zerolend_lending_pool_v5.aleo::credit_passport.get_or_use(caller, 0u8);
             assert(tier >= 1u8);
 
             let max_loan: u128 = max_loan_for_tier(tier);
@@ -315,116 +309,65 @@ program zerolend_usad_v1.aleo {
     }
 
     // ================================================================
-    // FLASH LOANS — Credit-Bonded
+    // FLASH LOANS — Atomic (single transition)
     // ================================================================
 
-    fn flash_open(
-        amount:     u128,
-        cur_block:  u32,
-        bond_nonce: field
+    fn flash_loan(
+        repayment:   test_usad_stablecoin.aleo::Token,    // must hold >= amount + fee
+        repay_proof: [test_usad_stablecoin.aleo::MerkleProof; 2],
+        amount:      u128,
+        loan_nonce:  field
     ) -> (
-        UsadFlashBond,
-        test_usad_stablecoin.aleo::ComplianceRecord,
-        test_usad_stablecoin.aleo::Token,
+        test_usad_stablecoin.aleo::ComplianceRecord,   // from repayment transfer
+        test_usad_stablecoin.aleo::Token,               // change (excess repayment)
+        test_usad_stablecoin.aleo::ComplianceRecord,   // from loan disbursement
+        test_usad_stablecoin.aleo::Token,               // loan funds
         Final
     ) {
         assert(amount > 0u128);
 
         let fee: u128        = (amount * FLASH_FEE_BPS) / 10_000u128;
         let actual_fee: u128 = fee > 0u128 ? fee : 1u128;
+        let total_owed: u128 = amount + actual_fee;
         let caller: address  = self.caller;
 
-        let (compliance, funds, transfer_future): (
+        assert(repayment.amount >= total_owed);
+
+        // 1. Return principal + fee → pool's public balance
+        let (repay_compliance, change, repay_future): (
+            test_usad_stablecoin.aleo::ComplianceRecord,
+            test_usad_stablecoin.aleo::Token,
+            Final
+        ) = test_usad_stablecoin.aleo::transfer_private_to_public(
+            self.address, total_owed, repayment, repay_proof
+        );
+
+        // 2. Disburse principal → caller's private token
+        let (loan_compliance, funds, loan_future): (
             test_usad_stablecoin.aleo::ComplianceRecord,
             test_usad_stablecoin.aleo::Token,
             Final
         ) = test_usad_stablecoin.aleo::transfer_public_to_private(caller, amount);
 
-        let bond: UsadFlashBond = UsadFlashBond {
-            owner:     caller,
-            amount:    amount,
-            fee:       actual_fee,
-            issued_at: cur_block,
-            expiry:    cur_block + FLASH_EXPIRY_BLOCKS,
-            nonce:     bond_nonce,
-        };
+        return (repay_compliance, change, loan_compliance, funds, final {
+            repay_future.run();
+            loan_future.run();
 
-        return (bond, compliance, funds, final {
-            transfer_future.run();
-
-            let tier: u8 = zerolend_lending_pool_v4.aleo::credit_passport.get_or_use(caller, 0u8);
-            assert(tier >= FLASH_MIN_TIER);
-
-            let used: bool = loan_nullifiers.get_or_use(bond_nonce, false);
+            let used: bool = loan_nullifiers.get_or_use(loan_nonce, false);
             assert(!used);
-            loan_nullifiers.set(bond_nonce, true);
+            loan_nullifiers.set(loan_nonce, true);
 
             let liq: u128 = pool_liquidity.get_or_use(0u8, 0u128);
             let bor: u128 = pool_borrowed.get_or_use(0u8, 0u128);
             assert(liq >= bor + amount);
 
-            pool_borrowed.set(0u8, bor + amount);
-            pending_flash.set(bond_nonce, amount + actual_fee);
-        });
-    }
-
-    fn flash_repay(
-        bond:    UsadFlashBond,
-        payment: test_usad_stablecoin.aleo::Token,
-        proof:   [test_usad_stablecoin.aleo::MerkleProof; 2]
-    ) -> (
-        test_usad_stablecoin.aleo::ComplianceRecord,
-        test_usad_stablecoin.aleo::Token,
-        Final
-    ) {
-        assert_eq(bond.owner, self.caller);
-        let owed: u128   = bond.amount + bond.fee;
-        let amount: u128 = bond.amount;
-        let fee: u128    = bond.fee;
-        let nonce: field = bond.nonce;
-
-        assert(payment.amount >= owed);
-
-        let (compliance, change, transfer_future): (
-            test_usad_stablecoin.aleo::ComplianceRecord,
-            test_usad_stablecoin.aleo::Token,
-            Final
-        ) = test_usad_stablecoin.aleo::transfer_private_to_public(
-            self.address, owed, payment, proof
-        );
-
-        return (compliance, change, final {
-            transfer_future.run();
-
-            let pending: u128 = pending_flash.get(nonce);
-            assert(pending == amount + fee);
-            pending_flash.set(nonce, 0u128);
-
-            let bor: u128 = pool_borrowed.get(0u8);
-            pool_borrowed.set(0u8, bor >= amount ? bor - amount : 0u128);
-
-            let liq: u128 = pool_liquidity.get(0u8);
-            pool_liquidity.set(0u8, liq + fee);
+            pool_liquidity.set(0u8, liq + actual_fee);
 
             let fees: u128 = flash_loan_fees.get_or_use(0u8, 0u128);
             let cnt:  u32  = flash_loan_count.get_or_use(0u8, 0u32);
-            flash_loan_fees.set(0u8, fees + fee);
+            flash_loan_fees.set(0u8, fees + actual_fee);
             flash_loan_count.set(0u8, cnt + 1u32);
         });
-    }
-
-    fn flash_default(bond: UsadFlashBond, cur_block: u32) -> Final {
-        assert(cur_block > bond.expiry);
-        let nonce: field = bond.nonce;
-        let amount: u128 = bond.amount;
-        return final {
-            let owed: u128 = pending_flash.get_or_use(nonce, 0u128);
-            assert(owed > 0u128);
-            pending_flash.set(nonce, 0u128);
-
-            let bor: u128 = pool_borrowed.get_or_use(0u8, 0u128);
-            pool_borrowed.set(0u8, bor >= amount ? bor - amount : 0u128);
-        };
     }
 
     // ================================================================

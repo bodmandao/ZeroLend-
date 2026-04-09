@@ -1,10 +1,10 @@
 {
-  "program": "zerolend_usdcx_v1.aleo",
-  "version": "0.1.0",
-  "description": "",
+  "program": "zerolend_usdcx_v2.aleo",
+  "version": "0.2.0",
+  "description": "ZeroLend USDCx lending pool — credit-gated undercollateralized borrowing in USDCx",
   "license": "MIT",
-  "leo": "3.4.0",
- "dependencies": [
+  "leo": "4.0.0",
+  "dependencies": [
     {
       "name": "test_usdcx_stablecoin.aleo",
       "location": "network",
@@ -12,7 +12,7 @@
       "edition": null
     },
     {
-      "name": "zerolend_lending_pool_v4.aleo",
+      "name": "zerolend_lending_pool_v5.aleo",
       "location": "network",
       "path": null,
       "edition": null
