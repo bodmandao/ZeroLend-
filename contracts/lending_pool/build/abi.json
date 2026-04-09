@@ -1,10 +1,10 @@
 {
-  "program": "zerolend_usad_v1.aleo",
+  "program": "zerolend_lending_pool_v4.aleo",
   "structs": [],
   "records": [
     {
       "path": [
-        "UsadDeposit"
+        "CreditRecord"
       ],
       "fields": [
         {
@@ -15,16 +15,52 @@
           "mode": "None"
         },
         {
-          "name": "deposited_amount",
+          "name": "wallet_age_days",
           "ty": {
             "Primitive": {
-              "UInt": "U128"
+              "UInt": "U32"
             }
           },
           "mode": "None"
         },
         {
-          "name": "deposit_block",
+          "name": "repayments_made",
+          "ty": {
+            "Primitive": {
+              "UInt": "U32"
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "defaults",
+          "ty": {
+            "Primitive": {
+              "UInt": "U32"
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "total_volume",
+          "ty": {
+            "Primitive": {
+              "UInt": "U64"
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "current_score",
+          "ty": {
+            "Primitive": {
+              "UInt": "U32"
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "last_updated",
           "ty": {
             "Primitive": {
               "UInt": "U32"
@@ -43,7 +79,53 @@
     },
     {
       "path": [
-        "UsadLoan"
+        "CreditTierProof"
+      ],
+      "fields": [
+        {
+          "name": "owner",
+          "ty": {
+            "Primitive": "Address"
+          },
+          "mode": "None"
+        },
+        {
+          "name": "tier",
+          "ty": {
+            "Primitive": {
+              "UInt": "U8"
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "org_id",
+          "ty": {
+            "Primitive": "Field"
+          },
+          "mode": "None"
+        },
+        {
+          "name": "expires_at",
+          "ty": {
+            "Primitive": {
+              "UInt": "U32"
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "nonce",
+          "ty": {
+            "Primitive": "Field"
+          },
+          "mode": "None"
+        }
+      ]
+    },
+    {
+      "path": [
+        "LoanRecord"
       ],
       "fields": [
         {
@@ -64,7 +146,7 @@
           "name": "principal",
           "ty": {
             "Primitive": {
-              "UInt": "U128"
+              "UInt": "U64"
             }
           },
           "mode": "None"
@@ -73,7 +155,7 @@
           "name": "interest_rate",
           "ty": {
             "Primitive": {
-              "UInt": "U128"
+              "UInt": "U64"
             }
           },
           "mode": "None"
@@ -116,7 +198,7 @@
     },
     {
       "path": [
-        "UsadFlashBond"
+        "LenderDeposit"
       ],
       "fields": [
         {
@@ -127,34 +209,16 @@
           "mode": "None"
         },
         {
-          "name": "amount",
+          "name": "deposited_amount",
           "ty": {
             "Primitive": {
-              "UInt": "U128"
+              "UInt": "U64"
             }
           },
           "mode": "None"
         },
         {
-          "name": "fee",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "name": "issued_at",
-          "ty": {
-            "Primitive": {
-              "UInt": "U32"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "name": "expiry",
+          "name": "deposit_block",
           "ty": {
             "Primitive": {
               "UInt": "U32"
@@ -193,7 +257,7 @@
       },
       "value": {
         "Primitive": {
-          "UInt": "U128"
+          "UInt": "U64"
         }
       }
     },
@@ -206,7 +270,7 @@
       },
       "value": {
         "Primitive": {
-          "UInt": "U128"
+          "UInt": "U64"
         }
       }
     },
@@ -219,7 +283,7 @@
       },
       "value": {
         "Primitive": {
-          "UInt": "U128"
+          "UInt": "U64"
         }
       }
     },
@@ -259,13 +323,37 @@
       }
     },
     {
-      "name": "pending_flash",
+      "name": "aggregate_tier_count",
       "key": {
-        "Primitive": "Field"
+        "Primitive": {
+          "UInt": "U8"
+        }
       },
       "value": {
         "Primitive": {
-          "UInt": "U128"
+          "UInt": "U32"
+        }
+      }
+    },
+    {
+      "name": "credit_passport",
+      "key": {
+        "Primitive": "Address"
+      },
+      "value": {
+        "Primitive": {
+          "UInt": "U8"
+        }
+      }
+    },
+    {
+      "name": "passport_updated_at",
+      "key": {
+        "Primitive": "Address"
+      },
+      "value": {
+        "Primitive": {
+          "UInt": "U32"
         }
       }
     },
@@ -278,7 +366,7 @@
       },
       "value": {
         "Primitive": {
-          "UInt": "U128"
+          "UInt": "U64"
         }
       }
     },
@@ -310,17 +398,186 @@
       ]
     },
     {
+      "name": "attest_credit",
+      "is_final": true,
+      "inputs": [
+        {
+          "name": "wallet_age_days",
+          "ty": {
+            "Plaintext": {
+              "Primitive": {
+                "UInt": "U32"
+              }
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "repayments_made",
+          "ty": {
+            "Plaintext": {
+              "Primitive": {
+                "UInt": "U32"
+              }
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "defaults",
+          "ty": {
+            "Plaintext": {
+              "Primitive": {
+                "UInt": "U32"
+              }
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "total_volume",
+          "ty": {
+            "Plaintext": {
+              "Primitive": {
+                "UInt": "U64"
+              }
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "current_block",
+          "ty": {
+            "Plaintext": {
+              "Primitive": {
+                "UInt": "U32"
+              }
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "record_nonce",
+          "ty": {
+            "Plaintext": {
+              "Primitive": "Field"
+            }
+          },
+          "mode": "None"
+        }
+      ],
+      "outputs": [
+        {
+          "ty": {
+            "Record": {
+              "path": [
+                "CreditRecord"
+              ],
+              "program": "zerolend_lending_pool_v4.aleo"
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "ty": "Final",
+          "mode": "None"
+        }
+      ]
+    },
+    {
+      "name": "prove_tier",
+      "is_final": false,
+      "inputs": [
+        {
+          "name": "rec",
+          "ty": {
+            "Record": {
+              "path": [
+                "CreditRecord"
+              ],
+              "program": "zerolend_lending_pool_v4.aleo"
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "proof_nonce",
+          "ty": {
+            "Plaintext": {
+              "Primitive": "Field"
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "expires_in",
+          "ty": {
+            "Plaintext": {
+              "Primitive": {
+                "UInt": "U32"
+              }
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "current_block",
+          "ty": {
+            "Plaintext": {
+              "Primitive": {
+                "UInt": "U32"
+              }
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "org_id",
+          "ty": {
+            "Plaintext": {
+              "Primitive": "Field"
+            }
+          },
+          "mode": "None"
+        }
+      ],
+      "outputs": [
+        {
+          "ty": {
+            "Record": {
+              "path": [
+                "CreditRecord"
+              ],
+              "program": "zerolend_lending_pool_v4.aleo"
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "ty": {
+            "Record": {
+              "path": [
+                "CreditTierProof"
+              ],
+              "program": "zerolend_lending_pool_v4.aleo"
+            }
+          },
+          "mode": "None"
+        }
+      ]
+    },
+    {
       "name": "deposit",
       "is_final": true,
       "inputs": [
         {
-          "name": "token",
+          "name": "input_credits",
           "ty": {
             "Record": {
               "path": [
-                "Token"
+                "credits"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "credits.aleo"
             }
           },
           "mode": "None"
@@ -330,33 +587,14 @@
           "ty": {
             "Plaintext": {
               "Primitive": {
-                "UInt": "U128"
+                "UInt": "U64"
               }
             }
           },
           "mode": "None"
         },
         {
-          "name": "proof",
-          "ty": {
-            "Plaintext": {
-              "Array": {
-                "element": {
-                  "Struct": {
-                    "path": [
-                      "MerkleProof"
-                    ],
-                    "program": "test_usad_stablecoin.aleo"
-                  }
-                },
-                "length": 2
-              }
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "name": "dep_block",
+          "name": "current_block",
           "ty": {
             "Plaintext": {
               "Primitive": {
@@ -381,9 +619,9 @@
           "ty": {
             "Record": {
               "path": [
-                "ComplianceRecord"
+                "credits"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "credits.aleo"
             }
           },
           "mode": "None"
@@ -392,20 +630,9 @@
           "ty": {
             "Record": {
               "path": [
-                "Token"
+                "LenderDeposit"
               ],
-              "program": "test_usad_stablecoin.aleo"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "ty": {
-            "Record": {
-              "path": [
-                "UsadDeposit"
-              ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_lending_pool_v4.aleo"
             }
           },
           "mode": "None"
@@ -425,15 +652,15 @@
           "ty": {
             "Record": {
               "path": [
-                "UsadDeposit"
+                "LenderDeposit"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_lending_pool_v4.aleo"
             }
           },
           "mode": "None"
         },
         {
-          "name": "cur_block",
+          "name": "current_block",
           "ty": {
             "Plaintext": {
               "Primitive": {
@@ -449,20 +676,9 @@
           "ty": {
             "Record": {
               "path": [
-                "ComplianceRecord"
+                "credits"
               ],
-              "program": "test_usad_stablecoin.aleo"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "ty": {
-            "Record": {
-              "path": [
-                "Token"
-              ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "credits.aleo"
             }
           },
           "mode": "None"
@@ -478,18 +694,30 @@
       "is_final": true,
       "inputs": [
         {
+          "name": "proof",
+          "ty": {
+            "Record": {
+              "path": [
+                "CreditTierProof"
+              ],
+              "program": "zerolend_lending_pool_v4.aleo"
+            }
+          },
+          "mode": "None"
+        },
+        {
           "name": "amount",
           "ty": {
             "Plaintext": {
               "Primitive": {
-                "UInt": "U128"
+                "UInt": "U64"
               }
             }
           },
           "mode": "None"
         },
         {
-          "name": "cur_block",
+          "name": "current_block",
           "ty": {
             "Plaintext": {
               "Primitive": {
@@ -523,9 +751,9 @@
           "ty": {
             "Record": {
               "path": [
-                "UsadLoan"
+                "CreditTierProof"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_lending_pool_v4.aleo"
             }
           },
           "mode": "None"
@@ -534,9 +762,9 @@
           "ty": {
             "Record": {
               "path": [
-                "ComplianceRecord"
+                "LoanRecord"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "zerolend_lending_pool_v4.aleo"
             }
           },
           "mode": "None"
@@ -545,9 +773,9 @@
           "ty": {
             "Record": {
               "path": [
-                "Token"
+                "credits"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "credits.aleo"
             }
           },
           "mode": "None"
@@ -567,9 +795,9 @@
           "ty": {
             "Record": {
               "path": [
-                "UsadLoan"
+                "LoanRecord"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_lending_pool_v4.aleo"
             }
           },
           "mode": "None"
@@ -579,39 +807,41 @@
           "ty": {
             "Record": {
               "path": [
-                "Token"
+                "credits"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "credits.aleo"
             }
           },
           "mode": "None"
         },
         {
-          "name": "proof",
+          "name": "rec",
           "ty": {
-            "Plaintext": {
-              "Array": {
-                "element": {
-                  "Struct": {
-                    "path": [
-                      "MerkleProof"
-                    ],
-                    "program": "test_usad_stablecoin.aleo"
-                  }
-                },
-                "length": 2
-              }
+            "Record": {
+              "path": [
+                "CreditRecord"
+              ],
+              "program": "zerolend_lending_pool_v4.aleo"
             }
           },
           "mode": "None"
         },
         {
-          "name": "cur_block",
+          "name": "current_block",
           "ty": {
             "Plaintext": {
               "Primitive": {
                 "UInt": "U32"
               }
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "new_rec_nonce",
+          "ty": {
+            "Plaintext": {
+              "Primitive": "Field"
             }
           },
           "mode": "None"
@@ -622,9 +852,9 @@
           "ty": {
             "Record": {
               "path": [
-                "ComplianceRecord"
+                "credits"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "credits.aleo"
             }
           },
           "mode": "None"
@@ -633,9 +863,9 @@
           "ty": {
             "Record": {
               "path": [
-                "Token"
+                "CreditRecord"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "zerolend_lending_pool_v4.aleo"
             }
           },
           "mode": "None"
@@ -655,49 +885,27 @@
           "ty": {
             "Record": {
               "path": [
-                "UsadLoan"
+                "LoanRecord"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_lending_pool_v4.aleo"
             }
           },
           "mode": "None"
         },
         {
-          "name": "cur_block",
+          "name": "rec",
           "ty": {
-            "Plaintext": {
-              "Primitive": {
-                "UInt": "U32"
-              }
-            }
-          },
-          "mode": "None"
-        }
-      ],
-      "outputs": [
-        {
-          "ty": "Final",
-          "mode": "None"
-        }
-      ]
-    },
-    {
-      "name": "flash_open",
-      "is_final": true,
-      "inputs": [
-        {
-          "name": "amount",
-          "ty": {
-            "Plaintext": {
-              "Primitive": {
-                "UInt": "U128"
-              }
+            "Record": {
+              "path": [
+                "CreditRecord"
+              ],
+              "program": "zerolend_lending_pool_v4.aleo"
             }
           },
           "mode": "None"
         },
         {
-          "name": "cur_block",
+          "name": "current_block",
           "ty": {
             "Plaintext": {
               "Primitive": {
@@ -708,7 +916,7 @@
           "mode": "None"
         },
         {
-          "name": "bond_nonce",
+          "name": "new_rec_nonce",
           "ty": {
             "Plaintext": {
               "Primitive": "Field"
@@ -722,31 +930,9 @@
           "ty": {
             "Record": {
               "path": [
-                "UsadFlashBond"
+                "CreditRecord"
               ],
-              "program": "zerolend_usad_v1.aleo"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "ty": {
-            "Record": {
-              "path": [
-                "ComplianceRecord"
-              ],
-              "program": "test_usad_stablecoin.aleo"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "ty": {
-            "Record": {
-              "path": [
-                "Token"
-              ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "zerolend_lending_pool_v4.aleo"
             }
           },
           "mode": "None"
@@ -758,48 +944,36 @@
       ]
     },
     {
-      "name": "flash_repay",
+      "name": "prove_solvency",
+      "is_final": true,
+      "inputs": [],
+      "outputs": [
+        {
+          "ty": "Final",
+          "mode": "None"
+        }
+      ]
+    },
+    {
+      "name": "flash_loan",
       "is_final": true,
       "inputs": [
         {
-          "name": "bond",
-          "ty": {
-            "Record": {
-              "path": [
-                "UsadFlashBond"
-              ],
-              "program": "zerolend_usad_v1.aleo"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "name": "payment",
-          "ty": {
-            "Record": {
-              "path": [
-                "Token"
-              ],
-              "program": "test_usad_stablecoin.aleo"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "name": "proof",
+          "name": "amount",
           "ty": {
             "Plaintext": {
-              "Array": {
-                "element": {
-                  "Struct": {
-                    "path": [
-                      "MerkleProof"
-                    ],
-                    "program": "test_usad_stablecoin.aleo"
-                  }
-                },
-                "length": 2
+              "Primitive": {
+                "UInt": "U64"
               }
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "loan_nonce",
+          "ty": {
+            "Plaintext": {
+              "Primitive": "Field"
             }
           },
           "mode": "None"
@@ -810,20 +984,9 @@
           "ty": {
             "Record": {
               "path": [
-                "ComplianceRecord"
+                "credits"
               ],
-              "program": "test_usad_stablecoin.aleo"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "ty": {
-            "Record": {
-              "path": [
-                "Token"
-              ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "credits.aleo"
             }
           },
           "mode": "None"
@@ -835,23 +998,23 @@
       ]
     },
     {
-      "name": "flash_default",
+      "name": "publish_passport",
       "is_final": true,
       "inputs": [
         {
-          "name": "bond",
+          "name": "rec",
           "ty": {
             "Record": {
               "path": [
-                "UsadFlashBond"
+                "CreditRecord"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_lending_pool_v4.aleo"
             }
           },
           "mode": "None"
         },
         {
-          "name": "cur_block",
+          "name": "current_block",
           "ty": {
             "Plaintext": {
               "Primitive": {
@@ -864,13 +1027,24 @@
       ],
       "outputs": [
         {
+          "ty": {
+            "Record": {
+              "path": [
+                "CreditRecord"
+              ],
+              "program": "zerolend_lending_pool_v4.aleo"
+            }
+          },
+          "mode": "None"
+        },
+        {
           "ty": "Final",
           "mode": "None"
         }
       ]
     },
     {
-      "name": "prove_solvency",
+      "name": "revoke_passport",
       "is_final": true,
       "inputs": [],
       "outputs": [

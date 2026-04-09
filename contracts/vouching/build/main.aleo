@@ -134,42 +134,41 @@ finalize redeem_vouch:
 function slash_vouch:
     input r0 as VouchRecord.record;
     input r1 as u32.private;
-    async slash_vouch r0.owner r0.borrower r0.staked r1 into r2;
+    async slash_vouch r0.owner r0.borrower r0.staked into r2;
     output r2 as zerolend_vouching_v1.aleo/slash_vouch.future;
 
 finalize slash_vouch:
     input r0 as address.public;
     input r1 as address.public;
     input r2 as u64.public;
-    input r3 as u32.public;
-    hash.bhp256 r0 into r4 as field;
-    hash.bhp256 r1 into r5 as field;
-    add r4 r5 into r6;
-    get active_vouches[r6] into r7;
-    gt r7 0u64 into r8;
-    assert.eq r8 true;
-    get.or_use zerolend_lending_pool_v4.aleo/credit_passport[r1] 0u8 into r9;
-    get.or_use vouch_boost[r1] 0u8 into r10;
-    lt r9 r10 into r11;
-    assert.eq r11 true;
-    set 0u64 into active_vouches[r6];
+    hash.bhp256 r0 into r3 as field;
+    hash.bhp256 r1 into r4 as field;
+    add r3 r4 into r5;
+    get active_vouches[r5] into r6;
+    gt r6 0u64 into r7;
+    assert.eq r7 true;
+    get.or_use zerolend_lending_pool_v4.aleo/credit_passport[r1] 0u8 into r8;
+    get.or_use vouch_boost[r1] 0u8 into r9;
+    lt r8 r9 into r10;
+    assert.eq r10 true;
+    set 0u64 into active_vouches[r5];
     set 0u8 into vouch_boost[r1];
-    get.or_use vouches_out[r0] 0u32 into r12;
-    gt r12 0u32 into r13;
-    branch.eq r13 false to end_then_0_2;
-    sub r12 1u32 into r14;
-    set r14 into vouches_out[r0];
+    get.or_use vouches_out[r0] 0u32 into r11;
+    gt r11 0u32 into r12;
+    branch.eq r12 false to end_then_0_2;
+    sub r11 1u32 into r13;
+    set r13 into vouches_out[r0];
     branch.eq true true to end_otherwise_0_3;
     position end_then_0_2;
     position end_otherwise_0_3;
-    get.or_use total_staked[r0] 0u64 into r15;
-    gte r15 r2 into r16;
-    sub r15 r2 into r17;
-    ternary r16 r17 0u64 into r18;
-    set r18 into total_staked[r0];
-    get.or_use slashed_to_pool[0u8] 0u64 into r19;
-    add r19 r2 into r20;
-    set r20 into slashed_to_pool[0u8];
+    get.or_use total_staked[r0] 0u64 into r14;
+    gte r14 r2 into r15;
+    sub r14 r2 into r16;
+    ternary r15 r16 0u64 into r17;
+    set r17 into total_staked[r0];
+    get.or_use slashed_to_pool[0u8] 0u64 into r18;
+    add r18 r2 into r19;
+    set r19 into slashed_to_pool[0u8];
 
 function prove_solvency:
     async prove_solvency into r0;

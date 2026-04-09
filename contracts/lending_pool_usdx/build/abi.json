@@ -1,10 +1,10 @@
 {
-  "program": "zerolend_usad_v1.aleo",
+  "program": "zerolend_usdcx_v1.aleo",
   "structs": [],
   "records": [
     {
       "path": [
-        "UsadDeposit"
+        "UsdcxDeposit"
       ],
       "fields": [
         {
@@ -43,7 +43,7 @@
     },
     {
       "path": [
-        "UsadLoan"
+        "UsdcxLoan"
       ],
       "fields": [
         {
@@ -116,7 +116,7 @@
     },
     {
       "path": [
-        "UsadFlashBond"
+        "UsdcxFlashBond"
       ],
       "fields": [
         {
@@ -320,7 +320,7 @@
               "path": [
                 "Token"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -346,7 +346,7 @@
                     "path": [
                       "MerkleProof"
                     ],
-                    "program": "test_usad_stablecoin.aleo"
+                    "program": "test_usdcx_stablecoin.aleo"
                   }
                 },
                 "length": 2
@@ -383,7 +383,7 @@
               "path": [
                 "ComplianceRecord"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -394,7 +394,7 @@
               "path": [
                 "Token"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -403,9 +403,9 @@
           "ty": {
             "Record": {
               "path": [
-                "UsadDeposit"
+                "UsdcxDeposit"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_usdcx_v1.aleo"
             }
           },
           "mode": "None"
@@ -425,9 +425,9 @@
           "ty": {
             "Record": {
               "path": [
-                "UsadDeposit"
+                "UsdcxDeposit"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_usdcx_v1.aleo"
             }
           },
           "mode": "None"
@@ -451,7 +451,7 @@
               "path": [
                 "ComplianceRecord"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -462,7 +462,7 @@
               "path": [
                 "Token"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -523,9 +523,9 @@
           "ty": {
             "Record": {
               "path": [
-                "UsadLoan"
+                "UsdcxLoan"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_usdcx_v1.aleo"
             }
           },
           "mode": "None"
@@ -536,7 +536,7 @@
               "path": [
                 "ComplianceRecord"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -547,7 +547,7 @@
               "path": [
                 "Token"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -567,9 +567,9 @@
           "ty": {
             "Record": {
               "path": [
-                "UsadLoan"
+                "UsdcxLoan"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_usdcx_v1.aleo"
             }
           },
           "mode": "None"
@@ -581,7 +581,7 @@
               "path": [
                 "Token"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -596,7 +596,7 @@
                     "path": [
                       "MerkleProof"
                     ],
-                    "program": "test_usad_stablecoin.aleo"
+                    "program": "test_usdcx_stablecoin.aleo"
                   }
                 },
                 "length": 2
@@ -624,7 +624,7 @@
               "path": [
                 "ComplianceRecord"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -635,7 +635,7 @@
               "path": [
                 "Token"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -655,9 +655,9 @@
           "ty": {
             "Record": {
               "path": [
-                "UsadLoan"
+                "UsdcxLoan"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_usdcx_v1.aleo"
             }
           },
           "mode": "None"
@@ -722,9 +722,9 @@
           "ty": {
             "Record": {
               "path": [
-                "UsadFlashBond"
+                "UsdcxFlashBond"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_usdcx_v1.aleo"
             }
           },
           "mode": "None"
@@ -735,7 +735,7 @@
               "path": [
                 "ComplianceRecord"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -746,7 +746,7 @@
               "path": [
                 "Token"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -766,9 +766,9 @@
           "ty": {
             "Record": {
               "path": [
-                "UsadFlashBond"
+                "UsdcxFlashBond"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_usdcx_v1.aleo"
             }
           },
           "mode": "None"
@@ -780,7 +780,7 @@
               "path": [
                 "Token"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -795,7 +795,7 @@
                     "path": [
                       "MerkleProof"
                     ],
-                    "program": "test_usad_stablecoin.aleo"
+                    "program": "test_usdcx_stablecoin.aleo"
                   }
                 },
                 "length": 2
@@ -812,7 +812,7 @@
               "path": [
                 "ComplianceRecord"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -823,7 +823,7 @@
               "path": [
                 "Token"
               ],
-              "program": "test_usad_stablecoin.aleo"
+              "program": "test_usdcx_stablecoin.aleo"
             }
           },
           "mode": "None"
@@ -843,9 +843,9 @@
           "ty": {
             "Record": {
               "path": [
-                "UsadFlashBond"
+                "UsdcxFlashBond"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_usdcx_v1.aleo"
             }
           },
           "mode": "None"

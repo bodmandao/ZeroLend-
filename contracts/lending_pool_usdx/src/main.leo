@@ -1,30 +1,40 @@
-// ================================================================
 // ZeroLend — USDCx Lending Pool
-// Program: zerolend_usdcx_v1.aleo
-//
 // Token: test_usdcx_stablecoin.aleo
 //   Token record:       { owner: address, amount: u128 }
 //   MerkleProof struct: { siblings: [field; 16], leaf_index: u32 }
 //
-// Key transfer signatures (from on-chain bytecode):
-//   transfer_public_to_private(recipient: address, amount: u128)
-//       → (ComplianceRecord, Token, Future)
-//
-//   transfer_private_to_public(recipient: address, amount: u128,
-//                              token: Token, proof: [MerkleProof; 2])
-//       → (ComplianceRecord, Token, Future)
-//
 // Credit tier is read directly from credit_passport mapping in
 // zerolend_lending_pool_v4.aleo — no CreditTierProof record needed.
 // User must call publish_passport on the main contract first.
-//
-// Note on privacy: amounts are u128.public in the stablecoin
-// program's transfer transitions, so loan/deposit amounts are
-// observable on-chain. Sender/recipient identity remains private.
 // ================================================================
 
 import test_usdcx_stablecoin.aleo;
 import zerolend_lending_pool_v4.aleo;
+
+// ================================================================
+// HELPERS
+// ================================================================
+
+fn compute_interest(principal: u128, rate_bps: u128, blocks_held: u32) -> u128 {
+    let blocks: u128 = blocks_held as u128;
+    return (principal * rate_bps * blocks) / 10_000_000u128;
+}
+
+fn rate_for_tier(tier: u8) -> u128 {
+    if tier == 5u8 { return 300u128;  }  // RATE_TIER_5
+    if tier == 4u8 { return 500u128;  }  // RATE_TIER_4
+    if tier == 3u8 { return 800u128;  }  // RATE_TIER_3
+    if tier == 2u8 { return 1100u128; }  // RATE_TIER_2
+    return 1500u128;                      // RATE_TIER_1
+}
+
+fn max_loan_for_tier(tier: u8) -> u128 {
+    if tier == 5u8 { return 5_000_000_000u128; }  // MAX_LOAN_TIER_5
+    if tier == 4u8 { return 1_000_000_000u128; }  // MAX_LOAN_TIER_4
+    if tier == 3u8 { return   200_000_000u128; }  // MAX_LOAN_TIER_3
+    if tier == 2u8 { return    50_000_000u128; }  // MAX_LOAN_TIER_2
+    return 10_000_000u128;                          // MAX_LOAN_TIER_1
+}
 
 program zerolend_usdcx_v1.aleo {
 
@@ -65,29 +75,19 @@ program zerolend_usdcx_v1.aleo {
     // Bronze=$10  Silver=$50  Gold=$200  Platinum=$1k  Diamond=$5k
     // ================================================================
 
-    const MAX_LOAN_TIER_1: u128 =    10_000_000u128;
-    const MAX_LOAN_TIER_2: u128 =    50_000_000u128;
-    const MAX_LOAN_TIER_3: u128 =   200_000_000u128;
-    const MAX_LOAN_TIER_4: u128 = 1_000_000_000u128;
-    const MAX_LOAN_TIER_5: u128 = 5_000_000_000u128;
-
-    // BPS per block, divided by 10_000_000 in compute_interest
-    const RATE_TIER_1: u128 = 1500u128;
-    const RATE_TIER_2: u128 = 1100u128;
-    const RATE_TIER_3: u128 =  800u128;
-    const RATE_TIER_4: u128 =  500u128;
-    const RATE_TIER_5: u128 =  300u128;
+    // Gold-tier rate used for deposit yield calculation
+    const RATE_TIER_3:        u128 = 800u128;
 
     // Flash loan fee: 30 bps = 0.3%
-    const FLASH_FEE_BPS: u128 = 30u128;
+    const FLASH_FEE_BPS:      u128 = 30u128;
 
     // Flash bond expiry: ~100 blocks (~17 min at 10s/block)
     const FLASH_EXPIRY_BLOCKS: u32 = 100u32;
 
     // Minimum credit tier required for flash loans (Gold = 3)
-    const FLASH_MIN_TIER: u8 = 3u8;
+    const FLASH_MIN_TIER:     u8   = 3u8;
 
-    const GRACE_PERIOD: u32 = 8640u32;
+    const GRACE_PERIOD:       u32  = 8640u32;
 
     // ================================================================
     // MAPPINGS
@@ -100,316 +100,252 @@ program zerolend_usdcx_v1.aleo {
     mapping active_loan_count:    u8    => u32;
     mapping loan_term_blocks:     u8    => u32;
     mapping loan_nullifiers:      field => bool;
-
-    // Flash bond tracking: nonce => (principal + fee) owed
     mapping pending_flash:        field => u128;
     mapping flash_loan_fees:      u8    => u128;
     mapping flash_loan_count:     u8    => u32;
 
     // ================================================================
-    // HELPERS
+    // CONSTRUCTOR
     // ================================================================
 
-    inline compute_interest(principal: u128, rate_bps: u128, blocks_held: u32) -> u128 {
-        let blocks: u128 = blocks_held as u128;
-        return (principal * rate_bps * blocks) / 10_000_000u128;
-    }
-
-    inline rate_for_tier(tier: u8) -> u128 {
-        if tier == 5u8 { return RATE_TIER_5; }
-        if tier == 4u8 { return RATE_TIER_4; }
-        if tier == 3u8 { return RATE_TIER_3; }
-        if tier == 2u8 { return RATE_TIER_2; }
-        return RATE_TIER_1;
-    }
-
-    inline max_loan_for_tier(tier: u8) -> u128 {
-        if tier == 5u8 { return MAX_LOAN_TIER_5; }
-        if tier == 4u8 { return MAX_LOAN_TIER_4; }
-        if tier == 3u8 { return MAX_LOAN_TIER_3; }
-        if tier == 2u8 { return MAX_LOAN_TIER_2; }
-        return MAX_LOAN_TIER_1;
-    }
-
     @noupgrade
-    async constructor() {}
+    constructor() {}
 
     // ================================================================
     // PROTOCOL SETUP
     // ================================================================
 
-    async transition initialize() -> Future {
-        return finalize_initialize(self.caller);
-    }
-
-    async function finalize_initialize(admin: address) {
-        let existing: address = Mapping::get_or_use(
-            protocol_admin, 0u8,
-            aleo1handyyun9zlhv56sgkjc7qp3mg0fsk0d8aqamt49g3sds4nu4urqsudpkf
-        );
-        assert_eq(existing, aleo1handyyun9zlhv56sgkjc7qp3mg0fsk0d8aqamt49g3sds4nu4urqsudpkf);
-
-        Mapping::set(protocol_admin,       0u8, admin);
-        Mapping::set(pool_liquidity,       0u8, 0u128);
-        Mapping::set(pool_borrowed,        0u8, 0u128);
-        Mapping::set(pool_interest_earned, 0u8, 0u128);
-        Mapping::set(active_loan_count,    0u8, 0u32);
-        Mapping::set(loan_term_blocks, 1u8,  17280u32);
-        Mapping::set(loan_term_blocks, 2u8,  43200u32);
-        Mapping::set(loan_term_blocks, 3u8,  86400u32);
-        Mapping::set(loan_term_blocks, 4u8, 172800u32);
-        Mapping::set(loan_term_blocks, 5u8, 259200u32);
+    fn initialize() -> Final {
+        let admin: address = self.caller;
+        return final {
+            let existing: address = protocol_admin.get_or_use(
+                0u8,
+                aleo1handyyun9zlhv56sgkjc7qp3mg0fsk0d8aqamt49g3sds4nu4urqsudpkf
+            );
+            assert_eq(existing, aleo1handyyun9zlhv56sgkjc7qp3mg0fsk0d8aqamt49g3sds4nu4urqsudpkf);
+            protocol_admin.set(0u8, admin);
+            pool_liquidity.set(0u8, 0u128);
+            pool_borrowed.set(0u8, 0u128);
+            pool_interest_earned.set(0u8, 0u128);
+            active_loan_count.set(0u8, 0u32);
+            loan_term_blocks.set(1u8, 17280u32);
+            loan_term_blocks.set(2u8, 43200u32);
+            loan_term_blocks.set(3u8, 86400u32);
+            loan_term_blocks.set(4u8, 172800u32);
+            loan_term_blocks.set(5u8, 259200u32);
+        };
     }
 
     // ================================================================
     // LENDING POOL — DEPOSIT / WITHDRAW
-    //
-    // Deposit: user's private Token → pool's public balance.
-    //   Calls transfer_private_to_public. Requires a MerkleProof
-    //   proving the depositor is not on the USDCx freeze list.
-    //   On testnet the freeze list is empty; construct the proof
-    //   via the get_credentials flow or use zeroed siblings.
-    //
-    // Withdraw: pool's public balance → user's private Token.
-    //   Calls transfer_public_to_private. No proof required.
     // ================================================================
 
-    async transition deposit(
-        token:     test_usdcx_stablecoin.aleo/Token,
+    fn deposit(
+        token:     test_usdcx_stablecoin.aleo::Token,
         amount:    u128,
-        proof:     [test_usdcx_stablecoin.aleo/MerkleProof; 2],
+        proof:     [test_usdcx_stablecoin.aleo::MerkleProof; 2],
         dep_block: u32,
         dep_nonce: field
     ) -> (
-        test_usdcx_stablecoin.aleo/ComplianceRecord,
-        test_usdcx_stablecoin.aleo/Token,
+        test_usdcx_stablecoin.aleo::ComplianceRecord,
+        test_usdcx_stablecoin.aleo::Token,
         UsdcxDeposit,
-        Future
+        Final
     ) {
-        // Transfer private token to pool's public balance.
-        // Returns: compliance record (to caller), change token (to caller).
+        let caller: address = self.caller;
+
         let (compliance, change, transfer_future): (
-            test_usdcx_stablecoin.aleo/ComplianceRecord,
-            test_usdcx_stablecoin.aleo/Token,
-            Future
-        ) = test_usdcx_stablecoin.aleo/transfer_private_to_public(
+            test_usdcx_stablecoin.aleo::ComplianceRecord,
+            test_usdcx_stablecoin.aleo::Token,
+            Final
+        ) = test_usdcx_stablecoin.aleo::transfer_private_to_public(
             self.address, amount, token, proof
         );
 
         let receipt: UsdcxDeposit = UsdcxDeposit {
-            owner:            self.caller,
+            owner:            caller,
             deposited_amount: amount,
             deposit_block:    dep_block,
             nonce:            dep_nonce,
         };
 
-        return (compliance, change, receipt, finalize_deposit(transfer_future, amount));
+        return (compliance, change, receipt, final {
+            transfer_future.run();
+            let liq: u128 = pool_liquidity.get_or_use(0u8, 0u128);
+            pool_liquidity.set(0u8, liq + amount);
+        });
     }
 
-    async function finalize_deposit(transfer_future: Future, amount: u128) {
-        transfer_future.await();
-        let liq: u128 = Mapping::get_or_use(pool_liquidity, 0u8, 0u128);
-        Mapping::set(pool_liquidity, 0u8, liq + amount);
-    }
-
-    /// Withdraw principal + yield. Yield rate mirrors Gold-tier borrow rate.
-    async transition withdraw(
+    fn withdraw(
         receipt:   UsdcxDeposit,
         cur_block: u32
     ) -> (
-        test_usdcx_stablecoin.aleo/ComplianceRecord,
-        test_usdcx_stablecoin.aleo/Token,
-        Future
+        test_usdcx_stablecoin.aleo::ComplianceRecord,
+        test_usdcx_stablecoin.aleo::Token,
+        Final
     ) {
         assert_eq(receipt.owner, self.caller);
 
-        let blocks: u32    = cur_block - receipt.deposit_block;
+        let blocks: u32     = cur_block - receipt.deposit_block;
         let yield_amt: u128 = compute_interest(receipt.deposited_amount, RATE_TIER_3, blocks);
-        let total: u128    = receipt.deposited_amount + yield_amt;
+        let total: u128     = receipt.deposited_amount + yield_amt;
+        let principal: u128 = receipt.deposited_amount;
 
         let (compliance, payout, transfer_future): (
-            test_usdcx_stablecoin.aleo/ComplianceRecord,
-            test_usdcx_stablecoin.aleo/Token,
-            Future
-        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, total);
+            test_usdcx_stablecoin.aleo::ComplianceRecord,
+            test_usdcx_stablecoin.aleo::Token,
+            Final
+        ) = test_usdcx_stablecoin.aleo::transfer_public_to_private(self.caller, total);
 
-        return (compliance, payout, finalize_withdraw(transfer_future, receipt.deposited_amount, yield_amt));
-    }
-
-    async function finalize_withdraw(transfer_future: Future, principal: u128, yield_paid: u128) {
-        transfer_future.await();
-        let liq: u128 = Mapping::get(pool_liquidity, 0u8);
-        assert(liq >= principal + yield_paid);
-        Mapping::set(pool_liquidity, 0u8, liq - principal - yield_paid);
+        return (compliance, payout, final {
+            transfer_future.run();
+            let liq: u128 = pool_liquidity.get(0u8);
+            assert(liq >= principal + yield_amt);
+            pool_liquidity.set(0u8, liq - principal - yield_amt);
+        });
     }
 
     // ================================================================
     // LOAN LIFECYCLE
-    //
-    // Credit tier is read from zerolend_lending_pool_v4.aleo's
-    // credit_passport mapping — the Credit Passport composability
-    // story made real. User publishes passport once, borrows in any
-    // ZeroLend pool without carrying a CreditTierProof record.
     // ================================================================
 
-    /// Borrow USDCx. Tier and limit enforced on-chain via Credit Passport.
-    async transition request_loan(
+    fn request_loan(
         amount:     u128,
         cur_block:  u32,
         loan_nonce: field,
         loan_id:    field
     ) -> (
         UsdcxLoan,
-        test_usdcx_stablecoin.aleo/ComplianceRecord,
-        test_usdcx_stablecoin.aleo/Token,
-        Future
+        test_usdcx_stablecoin.aleo::ComplianceRecord,
+        test_usdcx_stablecoin.aleo::Token,
+        Final
     ) {
         assert(amount > 0u128);
+        let caller: address = self.caller;
 
-        // Disburse from pool's public balance to borrower's private Token.
         let (compliance, loan_funds, transfer_future): (
-            test_usdcx_stablecoin.aleo/ComplianceRecord,
-            test_usdcx_stablecoin.aleo/Token,
-            Future
-        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, amount);
+            test_usdcx_stablecoin.aleo::ComplianceRecord,
+            test_usdcx_stablecoin.aleo::Token,
+            Final
+        ) = test_usdcx_stablecoin.aleo::transfer_public_to_private(caller, amount);
 
         let loan: UsdcxLoan = UsdcxLoan {
-            owner:          self.caller,
+            owner:          caller,
             loan_id:        loan_id,
             principal:      amount,
-            interest_rate:  0u128,       // resolved in finalize after passport read
+            interest_rate:  0u128,      // resolved in final after passport read
             borrowed_block: cur_block,
             due_block:      cur_block + 86400u32,
-            tier_at_borrow: 0u8,         // resolved in finalize
+            tier_at_borrow: 0u8,        // resolved in final
             nonce:          loan_nonce,
         };
 
-        return (loan, compliance, loan_funds, finalize_request_loan(
-            transfer_future, self.caller, amount, loan_id
-        ));
+        return (loan, compliance, loan_funds, final {
+            transfer_future.run();
+
+            let tier: u8 = zerolend_lending_pool_v4.aleo::credit_passport.get_or_use(caller, 0u8);
+            assert(tier >= 1u8);
+
+            let max_loan: u128 = max_loan_for_tier(tier);
+            assert(amount <= max_loan);
+
+            let used: bool = loan_nullifiers.get_or_use(loan_id, false);
+            assert(!used);
+            loan_nullifiers.set(loan_id, true);
+
+            let liq: u128 = pool_liquidity.get_or_use(0u8, 0u128);
+            let bor: u128 = pool_borrowed.get_or_use(0u8, 0u128);
+            assert(liq >= bor + amount);
+
+            pool_borrowed.set(0u8, bor + amount);
+
+            let lc: u32 = active_loan_count.get_or_use(0u8, 0u32);
+            active_loan_count.set(0u8, lc + 1u32);
+        });
     }
 
-    async function finalize_request_loan(
-        transfer_future: Future,
-        borrower:        address,
-        amount:          u128,
-        loan_id:         field
-    ) {
-        transfer_future.await();
-
-        // Read Credit Passport from the main ZeroLend contract.
-        // This is the Credit Passport composability in action.
-        let tier: u8 = zerolend_lending_pool_v4.aleo/credit_passport.get_or_use(borrower, 0u8);
-        assert(tier >= 1u8);
-
-        let max_loan: u128 = max_loan_for_tier(tier);
-        assert(amount <= max_loan);
-
-        let used: bool = Mapping::get_or_use(loan_nullifiers, loan_id, false);
-        assert(!used);
-        Mapping::set(loan_nullifiers, loan_id, true);
-
-        let liq: u128 = Mapping::get_or_use(pool_liquidity, 0u8, 0u128);
-        let bor: u128 = Mapping::get_or_use(pool_borrowed,  0u8, 0u128);
-        assert(liq >= bor + amount);
-
-        Mapping::set(pool_borrowed,  0u8, bor + amount);
-
-        let lc: u32 = Mapping::get_or_use(active_loan_count, 0u8, 0u32);
-        Mapping::set(active_loan_count, 0u8, lc + 1u32);
-    }
-
-    async transition repay_loan(
+    fn repay_loan(
         loan:      UsdcxLoan,
-        payment:   test_usdcx_stablecoin.aleo/Token,
-        proof:     [test_usdcx_stablecoin.aleo/MerkleProof; 2],
+        payment:   test_usdcx_stablecoin.aleo::Token,
+        proof:     [test_usdcx_stablecoin.aleo::MerkleProof; 2],
         cur_block: u32
     ) -> (
-        test_usdcx_stablecoin.aleo/ComplianceRecord,
-        test_usdcx_stablecoin.aleo/Token,
-        Future
+        test_usdcx_stablecoin.aleo::ComplianceRecord,
+        test_usdcx_stablecoin.aleo::Token,
+        Final
     ) {
         assert_eq(loan.owner, self.caller);
 
         let blocks: u32    = cur_block - loan.borrowed_block;
         let interest: u128 = compute_interest(loan.principal, loan.interest_rate, blocks);
         let owed: u128     = loan.principal + interest;
+        let principal: u128 = loan.principal;
 
         assert(payment.amount >= owed);
 
         let (compliance, change, transfer_future): (
-            test_usdcx_stablecoin.aleo/ComplianceRecord,
-            test_usdcx_stablecoin.aleo/Token,
-            Future
-        ) = test_usdcx_stablecoin.aleo/transfer_private_to_public(
+            test_usdcx_stablecoin.aleo::ComplianceRecord,
+            test_usdcx_stablecoin.aleo::Token,
+            Final
+        ) = test_usdcx_stablecoin.aleo::transfer_private_to_public(
             self.address, owed, payment, proof
         );
 
-        return (compliance, change, finalize_repay_loan(transfer_future, loan.principal, interest));
+        return (compliance, change, final {
+            transfer_future.run();
+
+            let bor: u128 = pool_borrowed.get(0u8);
+            assert(bor >= principal);
+            pool_borrowed.set(0u8, bor - principal);
+
+            let earned: u128 = pool_interest_earned.get_or_use(0u8, 0u128);
+            pool_interest_earned.set(0u8, earned + interest);
+
+            let lc: u32 = active_loan_count.get_or_use(0u8, 0u32);
+            if lc > 0u32 { active_loan_count.set(0u8, lc - 1u32); }
+        });
     }
 
-    async function finalize_repay_loan(transfer_future: Future, principal: u128, interest: u128) {
-        transfer_future.await();
-        let bor: u128 = Mapping::get(pool_borrowed, 0u8);
-        assert(bor >= principal);
-        Mapping::set(pool_borrowed, 0u8, bor - principal);
-
-        let earned: u128 = Mapping::get_or_use(pool_interest_earned, 0u8, 0u128);
-        Mapping::set(pool_interest_earned, 0u8, earned + interest);
-
-        let lc: u32 = Mapping::get_or_use(active_loan_count, 0u8, 0u32);
-        if lc > 0u32 { Mapping::set(active_loan_count, 0u8, lc - 1u32); }
-    }
-
-    /// Mark an overdue loan as defaulted. Anyone can call after grace period.
-    async transition liquidate(loan: UsdcxLoan, cur_block: u32) -> Future {
+    fn liquidate(loan: UsdcxLoan, cur_block: u32) -> Final {
         assert(cur_block > loan.due_block + GRACE_PERIOD);
-        return finalize_liquidate(loan.principal);
-    }
+        let principal: u128 = loan.principal;
+        return final {
+            let bor: u128 = pool_borrowed.get_or_use(0u8, 0u128);
+            pool_borrowed.set(0u8, bor >= principal ? bor - principal : 0u128);
 
-    async function finalize_liquidate(principal: u128) {
-        let bor: u128 = Mapping::get_or_use(pool_borrowed, 0u8, 0u128);
-        Mapping::set(pool_borrowed, 0u8, bor >= principal ? bor - principal : 0u128);
-
-        let lc: u32 = Mapping::get_or_use(active_loan_count, 0u8, 0u32);
-        if lc > 0u32 { Mapping::set(active_loan_count, 0u8, lc - 1u32); }
+            let lc: u32 = active_loan_count.get_or_use(0u8, 0u32);
+            if lc > 0u32 { active_loan_count.set(0u8, lc - 1u32); }
+        };
     }
 
     // ================================================================
     // FLASH LOANS — Credit-Bonded
-    //
-    // flash_open:  requires Gold tier+ via Credit Passport; issues
-    //              FlashBond record and disburses tokens.
-    // flash_repay: borrower repays principal + fee, bond consumed.
-    // flash_default: callable by anyone after bond.expiry — slashes
-    //              the pool book and marks the borrow as a default.
-    //              The liquidation bot then calls liquidate() on the
-    //              ALEO main contract to tank the credit score.
     // ================================================================
 
-    async transition flash_open(
+    fn flash_open(
         amount:     u128,
         cur_block:  u32,
         bond_nonce: field
     ) -> (
         UsdcxFlashBond,
-        test_usdcx_stablecoin.aleo/ComplianceRecord,
-        test_usdcx_stablecoin.aleo/Token,
-        Future
+        test_usdcx_stablecoin.aleo::ComplianceRecord,
+        test_usdcx_stablecoin.aleo::Token,
+        Final
     ) {
         assert(amount > 0u128);
 
-        let fee: u128 = (amount * FLASH_FEE_BPS) / 10_000u128;
+        let fee: u128        = (amount * FLASH_FEE_BPS) / 10_000u128;
         let actual_fee: u128 = fee > 0u128 ? fee : 1u128;
+        let caller: address  = self.caller;
 
         let (compliance, funds, transfer_future): (
-            test_usdcx_stablecoin.aleo/ComplianceRecord,
-            test_usdcx_stablecoin.aleo/Token,
-            Future
-        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, amount);
+            test_usdcx_stablecoin.aleo::ComplianceRecord,
+            test_usdcx_stablecoin.aleo::Token,
+            Final
+        ) = test_usdcx_stablecoin.aleo::transfer_public_to_private(caller, amount);
 
         let bond: UsdcxFlashBond = UsdcxFlashBond {
-            owner:     self.caller,
+            owner:     caller,
             amount:    amount,
             fee:       actual_fee,
             issued_at: cur_block,
@@ -417,110 +353,93 @@ program zerolend_usdcx_v1.aleo {
             nonce:     bond_nonce,
         };
 
-        return (bond, compliance, funds, finalize_flash_open(
-            transfer_future, self.caller, amount, actual_fee, bond_nonce
-        ));
+        return (bond, compliance, funds, final {
+            transfer_future.run();
+
+            let tier: u8 = zerolend_lending_pool_v4.aleo::credit_passport.get_or_use(caller, 0u8);
+            assert(tier >= FLASH_MIN_TIER);
+
+            let used: bool = loan_nullifiers.get_or_use(bond_nonce, false);
+            assert(!used);
+            loan_nullifiers.set(bond_nonce, true);
+
+            let liq: u128 = pool_liquidity.get_or_use(0u8, 0u128);
+            let bor: u128 = pool_borrowed.get_or_use(0u8, 0u128);
+            assert(liq >= bor + amount);
+
+            pool_borrowed.set(0u8, bor + amount);
+            pending_flash.set(bond_nonce, amount + actual_fee);
+        });
     }
 
-    async function finalize_flash_open(
-        transfer_future: Future,
-        borrower:        address,
-        amount:          u128,
-        fee:             u128,
-        bond_nonce:      field
-    ) {
-        transfer_future.await();
-
-        let tier: u8 = zerolend_lending_pool_v4.aleo/credit_passport.get_or_use(borrower, 0u8);
-        assert(tier >= FLASH_MIN_TIER);
-
-        let used: bool = Mapping::get_or_use(loan_nullifiers, bond_nonce, false);
-        assert(!used);
-        Mapping::set(loan_nullifiers, bond_nonce, true);
-
-        let liq: u128 = Mapping::get_or_use(pool_liquidity, 0u8, 0u128);
-        let bor: u128 = Mapping::get_or_use(pool_borrowed,  0u8, 0u128);
-        assert(liq >= bor + amount);
-
-        Mapping::set(pool_borrowed,  0u8, bor + amount);
-        Mapping::set(pending_flash, bond_nonce, amount + fee);
-    }
-
-    async transition flash_repay(
+    fn flash_repay(
         bond:    UsdcxFlashBond,
-        payment: test_usdcx_stablecoin.aleo/Token,
-        proof:   [test_usdcx_stablecoin.aleo/MerkleProof; 2]
+        payment: test_usdcx_stablecoin.aleo::Token,
+        proof:   [test_usdcx_stablecoin.aleo::MerkleProof; 2]
     ) -> (
-        test_usdcx_stablecoin.aleo/ComplianceRecord,
-        test_usdcx_stablecoin.aleo/Token,
-        Future
+        test_usdcx_stablecoin.aleo::ComplianceRecord,
+        test_usdcx_stablecoin.aleo::Token,
+        Final
     ) {
         assert_eq(bond.owner, self.caller);
-        let owed: u128 = bond.amount + bond.fee;
+        let owed: u128     = bond.amount + bond.fee;
+        let amount: u128   = bond.amount;
+        let fee: u128      = bond.fee;
+        let nonce: field   = bond.nonce;
+
         assert(payment.amount >= owed);
 
         let (compliance, change, transfer_future): (
-            test_usdcx_stablecoin.aleo/ComplianceRecord,
-            test_usdcx_stablecoin.aleo/Token,
-            Future
-        ) = test_usdcx_stablecoin.aleo/transfer_private_to_public(
+            test_usdcx_stablecoin.aleo::ComplianceRecord,
+            test_usdcx_stablecoin.aleo::Token,
+            Final
+        ) = test_usdcx_stablecoin.aleo::transfer_private_to_public(
             self.address, owed, payment, proof
         );
 
-        return (compliance, change, finalize_flash_repay(
-            transfer_future, bond.nonce, bond.amount, bond.fee
-        ));
+        return (compliance, change, final {
+            transfer_future.run();
+
+            let pending: u128 = pending_flash.get(nonce);
+            assert(pending == amount + fee);
+            pending_flash.set(nonce, 0u128);
+
+            let bor: u128 = pool_borrowed.get(0u8);
+            pool_borrowed.set(0u8, bor >= amount ? bor - amount : 0u128);
+
+            let liq: u128 = pool_liquidity.get(0u8);
+            pool_liquidity.set(0u8, liq + fee);
+
+            let fees: u128 = flash_loan_fees.get_or_use(0u8, 0u128);
+            let cnt:  u32  = flash_loan_count.get_or_use(0u8, 0u32);
+            flash_loan_fees.set(0u8, fees + fee);
+            flash_loan_count.set(0u8, cnt + 1u32);
+        });
     }
 
-    async function finalize_flash_repay(
-        transfer_future: Future,
-        bond_nonce:      field,
-        amount:          u128,
-        fee:             u128
-    ) {
-        transfer_future.await();
-
-        let owed: u128 = Mapping::get(pending_flash, bond_nonce);
-        assert(owed == amount + fee);
-        Mapping::set(pending_flash, bond_nonce, 0u128);
-
-        let bor: u128 = Mapping::get(pool_borrowed, 0u8);
-        Mapping::set(pool_borrowed, 0u8, bor >= amount ? bor - amount : 0u128);
-
-        let liq: u128 = Mapping::get(pool_liquidity, 0u8);
-        Mapping::set(pool_liquidity, 0u8, liq + fee);
-
-        let fees: u128 = Mapping::get_or_use(flash_loan_fees,  0u8, 0u128);
-        let cnt:  u32  = Mapping::get_or_use(flash_loan_count, 0u8, 0u32);
-        Mapping::set(flash_loan_fees,  0u8, fees + fee);
-        Mapping::set(flash_loan_count, 0u8, cnt  + 1u32);
-    }
-
-    /// Slash an expired flash bond. Callable by anyone after bond.expiry.
-    async transition flash_default(bond: UsdcxFlashBond, cur_block: u32) -> Future {
+    fn flash_default(bond: UsdcxFlashBond, cur_block: u32) -> Final {
         assert(cur_block > bond.expiry);
-        return finalize_flash_default(bond.nonce, bond.amount);
-    }
+        let nonce: field   = bond.nonce;
+        let amount: u128   = bond.amount;
+        return final {
+            let owed: u128 = pending_flash.get_or_use(nonce, 0u128);
+            assert(owed > 0u128);
+            pending_flash.set(nonce, 0u128);
 
-    async function finalize_flash_default(bond_nonce: field, amount: u128) {
-        let owed: u128 = Mapping::get_or_use(pending_flash, bond_nonce, 0u128);
-        assert(owed > 0u128);
-        Mapping::set(pending_flash, bond_nonce, 0u128);
-        let bor: u128 = Mapping::get_or_use(pool_borrowed, 0u8, 0u128);
-        Mapping::set(pool_borrowed, 0u8, bor >= amount ? bor - amount : 0u128);
+            let bor: u128 = pool_borrowed.get_or_use(0u8, 0u128);
+            pool_borrowed.set(0u8, bor >= amount ? bor - amount : 0u128);
+        };
     }
 
     // ================================================================
     // SOLVENCY CHECK
     // ================================================================
 
-    async transition prove_solvency() -> Future {
-        return finalize_prove_solvency();
-    }
-
-    async function finalize_prove_solvency() {
-        let liq: u128 = Mapping::get_or_use(pool_liquidity, 0u8, 0u128);
-        let bor: u128 = Mapping::get_or_use(pool_borrowed,  0u8, 0u128);
-        assert(bor <= liq);
+    fn prove_solvency() -> Final {
+        return final {
+            let liq: u128 = pool_liquidity.get_or_use(0u8, 0u128);
+            let bor: u128 = pool_borrowed.get_or_use(0u8, 0u128);
+            assert(bor <= liq);
+        };
     }
 }
