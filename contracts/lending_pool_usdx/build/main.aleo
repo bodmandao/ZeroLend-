@@ -2,9 +2,10 @@ import merkle_tree.aleo;
 import test_usdcx_multisig_core.aleo;
 import test_usdcx_freezelist.aleo;
 import test_usdcx_stablecoin.aleo;
+import zerolend_oracle_v2.aleo;
 import credits.aleo;
-import zerolend_lending_pool_v4.aleo;
-program zerolend_usdcx_v1.aleo;
+import zerolend_lending_pool_v5.aleo;
+program zerolend_usdcx_v2.aleo;
 
 record UsdcxDeposit:
     owner as address.private;
@@ -20,14 +21,6 @@ record UsdcxLoan:
     borrowed_block as u32.private;
     due_block as u32.private;
     tier_at_borrow as u8.private;
-    nonce as field.private;
-
-record UsdcxFlashBond:
-    owner as address.private;
-    amount as u128.private;
-    fee as u128.private;
-    issued_at as u32.private;
-    expiry as u32.private;
     nonce as field.private;
 
 mapping protocol_admin:
@@ -58,10 +51,6 @@ mapping loan_nullifiers:
     key as field.public;
     value as boolean.public;
 
-mapping pending_flash:
-    key as field.public;
-    value as u128.public;
-
 mapping flash_loan_fees:
     key as u8.public;
     value as u128.public;
@@ -72,7 +61,7 @@ mapping flash_loan_count:
 
 function initialize:
     async initialize self.caller into r0;
-    output r0 as zerolend_usdcx_v1.aleo/initialize.future;
+    output r0 as zerolend_usdcx_v2.aleo/initialize.future;
 
 finalize initialize:
     input r0 as address.public;
@@ -95,13 +84,13 @@ function deposit:
     input r2 as [test_usdcx_stablecoin.aleo/MerkleProof; 2u32].private;
     input r3 as u32.private;
     input r4 as field.private;
-    call test_usdcx_stablecoin.aleo/transfer_private_to_public zerolend_usdcx_v1.aleo r1 r0 r2 into r5 r6 r7;
+    call test_usdcx_stablecoin.aleo/transfer_private_to_public zerolend_usdcx_v2.aleo r1 r0 r2 into r5 r6 r7;
     cast self.caller r1 r3 r4 into r8 as UsdcxDeposit.record;
     async deposit r7 r1 into r9;
     output r5 as test_usdcx_stablecoin.aleo/ComplianceRecord.record;
     output r6 as test_usdcx_stablecoin.aleo/Token.record;
     output r8 as UsdcxDeposit.record;
-    output r9 as zerolend_usdcx_v1.aleo/deposit.future;
+    output r9 as zerolend_usdcx_v2.aleo/deposit.future;
 
 finalize deposit:
     input r0 as test_usdcx_stablecoin.aleo/transfer_private_to_public.future;
@@ -132,7 +121,7 @@ function withdraw:
     async withdraw r7 r0.deposited_amount r3 into r8;
     output r5 as test_usdcx_stablecoin.aleo/ComplianceRecord.record;
     output r6 as test_usdcx_stablecoin.aleo/Token.record;
-    output r8 as zerolend_usdcx_v1.aleo/withdraw.future;
+    output r8 as zerolend_usdcx_v2.aleo/withdraw.future;
 
 finalize withdraw:
     input r0 as test_usdcx_stablecoin.aleo/transfer_public_to_private.future;
@@ -161,7 +150,7 @@ function request_loan:
     output r9 as UsdcxLoan.record;
     output r5 as test_usdcx_stablecoin.aleo/ComplianceRecord.record;
     output r6 as test_usdcx_stablecoin.aleo/Token.record;
-    output r10 as zerolend_usdcx_v1.aleo/request_loan.future;
+    output r10 as zerolend_usdcx_v2.aleo/request_loan.future;
 
 finalize request_loan:
     input r0 as test_usdcx_stablecoin.aleo/transfer_public_to_private.future;
@@ -169,7 +158,7 @@ finalize request_loan:
     input r2 as u128.public;
     input r3 as field.public;
     await r0;
-    get.or_use zerolend_lending_pool_v4.aleo/credit_passport[r1] 0u8 into r4;
+    get.or_use zerolend_lending_pool_v5.aleo/credit_passport[r1] 0u8 into r4;
     gte r4 1u8 into r5;
     assert.eq r5 true;
     is.eq r4 5u8 into r6;
@@ -207,11 +196,11 @@ function repay_loan:
     add r0.principal r5 into r6;
     gte r1.amount r6 into r7;
     assert.eq r7 true;
-    call test_usdcx_stablecoin.aleo/transfer_private_to_public zerolend_usdcx_v1.aleo r6 r1 r2 into r8 r9 r10;
+    call test_usdcx_stablecoin.aleo/transfer_private_to_public zerolend_usdcx_v2.aleo r6 r1 r2 into r8 r9 r10;
     async repay_loan r10 r0.principal r5 into r11;
     output r8 as test_usdcx_stablecoin.aleo/ComplianceRecord.record;
     output r9 as test_usdcx_stablecoin.aleo/Token.record;
-    output r11 as zerolend_usdcx_v1.aleo/repay_loan.future;
+    output r11 as zerolend_usdcx_v2.aleo/repay_loan.future;
 
 finalize repay_loan:
     input r0 as test_usdcx_stablecoin.aleo/transfer_private_to_public.future;
@@ -242,7 +231,7 @@ function liquidate:
     gt r1 r2 into r3;
     assert.eq r3 true;
     async liquidate r0.principal into r4;
-    output r4 as zerolend_usdcx_v1.aleo/liquidate.future;
+    output r4 as zerolend_usdcx_v2.aleo/liquidate.future;
 
 finalize liquidate:
     input r0 as u128.public;
@@ -260,112 +249,58 @@ finalize liquidate:
     position end_then_0_2;
     position end_otherwise_0_3;
 
-function flash_open:
-    input r0 as u128.private;
-    input r1 as u32.private;
-    input r2 as field.private;
-    gt r0 0u128 into r3;
-    assert.eq r3 true;
-    mul r0 30u128 into r4;
-    div r4 10000u128 into r5;
-    gt r5 0u128 into r6;
-    ternary r6 r5 1u128 into r7;
-    call test_usdcx_stablecoin.aleo/transfer_public_to_private self.caller r0 into r8 r9 r10;
-    add r1 100u32 into r11;
-    cast self.caller r0 r7 r1 r11 r2 into r12 as UsdcxFlashBond.record;
-    async flash_open r10 self.caller r2 r0 r7 into r13;
-    output r12 as UsdcxFlashBond.record;
-    output r8 as test_usdcx_stablecoin.aleo/ComplianceRecord.record;
-    output r9 as test_usdcx_stablecoin.aleo/Token.record;
-    output r13 as zerolend_usdcx_v1.aleo/flash_open.future;
+function flash_loan:
+    input r0 as test_usdcx_stablecoin.aleo/Token.record;
+    input r1 as [test_usdcx_stablecoin.aleo/MerkleProof; 2u32].private;
+    input r2 as u128.private;
+    input r3 as field.private;
+    gt r2 0u128 into r4;
+    assert.eq r4 true;
+    mul r2 30u128 into r5;
+    div r5 10000u128 into r6;
+    gt r6 0u128 into r7;
+    ternary r7 r6 1u128 into r8;
+    add r2 r8 into r9;
+    gte r0.amount r9 into r10;
+    assert.eq r10 true;
+    call test_usdcx_stablecoin.aleo/transfer_private_to_public zerolend_usdcx_v2.aleo r9 r0 r1 into r11 r12 r13;
+    call test_usdcx_stablecoin.aleo/transfer_public_to_private self.caller r2 into r14 r15 r16;
+    async flash_loan r13 r16 r3 r2 r8 into r17;
+    output r11 as test_usdcx_stablecoin.aleo/ComplianceRecord.record;
+    output r12 as test_usdcx_stablecoin.aleo/Token.record;
+    output r14 as test_usdcx_stablecoin.aleo/ComplianceRecord.record;
+    output r15 as test_usdcx_stablecoin.aleo/Token.record;
+    output r17 as zerolend_usdcx_v2.aleo/flash_loan.future;
 
-finalize flash_open:
-    input r0 as test_usdcx_stablecoin.aleo/transfer_public_to_private.future;
-    input r1 as address.public;
+finalize flash_loan:
+    input r0 as test_usdcx_stablecoin.aleo/transfer_private_to_public.future;
+    input r1 as test_usdcx_stablecoin.aleo/transfer_public_to_private.future;
     input r2 as field.public;
     input r3 as u128.public;
     input r4 as u128.public;
     await r0;
-    get.or_use zerolend_lending_pool_v4.aleo/credit_passport[r1] 0u8 into r5;
-    gte r5 3u8 into r6;
+    await r1;
+    get.or_use loan_nullifiers[r2] false into r5;
+    not r5 into r6;
     assert.eq r6 true;
-    get.or_use loan_nullifiers[r2] false into r7;
-    not r7 into r8;
-    assert.eq r8 true;
     set true into loan_nullifiers[r2];
-    get.or_use pool_liquidity[0u8] 0u128 into r9;
-    get.or_use pool_borrowed[0u8] 0u128 into r10;
-    add r10 r3 into r11;
-    gte r9 r11 into r12;
-    assert.eq r12 true;
-    set r11 into pool_borrowed[0u8];
-    add r3 r4 into r13;
-    set r13 into pending_flash[r2];
-
-function flash_repay:
-    input r0 as UsdcxFlashBond.record;
-    input r1 as test_usdcx_stablecoin.aleo/Token.record;
-    input r2 as [test_usdcx_stablecoin.aleo/MerkleProof; 2u32].private;
-    assert.eq r0.owner self.caller;
-    add r0.amount r0.fee into r3;
-    gte r1.amount r3 into r4;
-    assert.eq r4 true;
-    call test_usdcx_stablecoin.aleo/transfer_private_to_public zerolend_usdcx_v1.aleo r3 r1 r2 into r5 r6 r7;
-    async flash_repay r7 r0.nonce r0.amount r0.fee into r8;
-    output r5 as test_usdcx_stablecoin.aleo/ComplianceRecord.record;
-    output r6 as test_usdcx_stablecoin.aleo/Token.record;
-    output r8 as zerolend_usdcx_v1.aleo/flash_repay.future;
-
-finalize flash_repay:
-    input r0 as test_usdcx_stablecoin.aleo/transfer_private_to_public.future;
-    input r1 as field.public;
-    input r2 as u128.public;
-    input r3 as u128.public;
-    await r0;
-    get pending_flash[r1] into r4;
-    add r2 r3 into r5;
-    is.eq r4 r5 into r6;
-    assert.eq r6 true;
-    set 0u128 into pending_flash[r1];
-    get pool_borrowed[0u8] into r7;
-    gte r7 r2 into r8;
-    sub r7 r2 into r9;
-    ternary r8 r9 0u128 into r10;
-    set r10 into pool_borrowed[0u8];
-    get pool_liquidity[0u8] into r11;
-    add r11 r3 into r12;
-    set r12 into pool_liquidity[0u8];
-    get.or_use flash_loan_fees[0u8] 0u128 into r13;
-    get.or_use flash_loan_count[0u8] 0u32 into r14;
-    add r13 r3 into r15;
-    set r15 into flash_loan_fees[0u8];
-    add r14 1u32 into r16;
-    set r16 into flash_loan_count[0u8];
-
-function flash_default:
-    input r0 as UsdcxFlashBond.record;
-    input r1 as u32.private;
-    gt r1 r0.expiry into r2;
-    assert.eq r2 true;
-    async flash_default r0.nonce r0.amount into r3;
-    output r3 as zerolend_usdcx_v1.aleo/flash_default.future;
-
-finalize flash_default:
-    input r0 as field.public;
-    input r1 as u128.public;
-    get.or_use pending_flash[r0] 0u128 into r2;
-    gt r2 0u128 into r3;
-    assert.eq r3 true;
-    set 0u128 into pending_flash[r0];
-    get.or_use pool_borrowed[0u8] 0u128 into r4;
-    gte r4 r1 into r5;
-    sub r4 r1 into r6;
-    ternary r5 r6 0u128 into r7;
-    set r7 into pool_borrowed[0u8];
+    get.or_use pool_liquidity[0u8] 0u128 into r7;
+    get.or_use pool_borrowed[0u8] 0u128 into r8;
+    add r8 r3 into r9;
+    gte r7 r9 into r10;
+    assert.eq r10 true;
+    add r7 r4 into r11;
+    set r11 into pool_liquidity[0u8];
+    get.or_use flash_loan_fees[0u8] 0u128 into r12;
+    get.or_use flash_loan_count[0u8] 0u32 into r13;
+    add r12 r4 into r14;
+    set r14 into flash_loan_fees[0u8];
+    add r13 1u32 into r15;
+    set r15 into flash_loan_count[0u8];
 
 function prove_solvency:
     async prove_solvency into r0;
-    output r0 as zerolend_usdcx_v1.aleo/prove_solvency.future;
+    output r0 as zerolend_usdcx_v2.aleo/prove_solvency.future;
 
 finalize prove_solvency:
     get.or_use pool_liquidity[0u8] 0u128 into r0;

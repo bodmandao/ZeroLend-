@@ -1,5 +1,5 @@
 {
-  "program": "zerolend_lending_pool_v4.aleo",
+  "program": "zerolend_lending_pool_v5.aleo",
   "structs": [],
   "records": [
     {
@@ -473,7 +473,7 @@
               "path": [
                 "CreditRecord"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -495,7 +495,7 @@
               "path": [
                 "CreditRecord"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -548,7 +548,7 @@
               "path": [
                 "CreditRecord"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -559,7 +559,7 @@
               "path": [
                 "CreditTierProof"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -632,7 +632,7 @@
               "path": [
                 "LenderDeposit"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -654,7 +654,7 @@
               "path": [
                 "LenderDeposit"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -700,7 +700,7 @@
               "path": [
                 "CreditTierProof"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -753,7 +753,7 @@
               "path": [
                 "CreditTierProof"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -764,7 +764,7 @@
               "path": [
                 "LoanRecord"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -797,7 +797,7 @@
               "path": [
                 "LoanRecord"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -821,7 +821,7 @@
               "path": [
                 "CreditRecord"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -865,7 +865,7 @@
               "path": [
                 "CreditRecord"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -887,7 +887,7 @@
               "path": [
                 "LoanRecord"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -899,7 +899,7 @@
               "path": [
                 "CreditRecord"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -932,7 +932,7 @@
               "path": [
                 "CreditRecord"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -958,6 +958,18 @@
       "name": "flash_loan",
       "is_final": true,
       "inputs": [
+        {
+          "name": "repayment",
+          "ty": {
+            "Record": {
+              "path": [
+                "credits"
+              ],
+              "program": "credits.aleo"
+            }
+          },
+          "mode": "None"
+        },
         {
           "name": "amount",
           "ty": {
@@ -992,6 +1004,17 @@
           "mode": "None"
         },
         {
+          "ty": {
+            "Record": {
+              "path": [
+                "credits"
+              ],
+              "program": "credits.aleo"
+            }
+          },
+          "mode": "None"
+        },
+        {
           "ty": "Final",
           "mode": "None"
         }
@@ -1008,7 +1031,7 @@
               "path": [
                 "CreditRecord"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"
@@ -1032,7 +1055,7 @@
               "path": [
                 "CreditRecord"
               ],
-              "program": "zerolend_lending_pool_v4.aleo"
+              "program": "zerolend_lending_pool_v5.aleo"
             }
           },
           "mode": "None"

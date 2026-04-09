@@ -1,5 +1,5 @@
 {
-  "program": "zerolend_usad_v1.aleo",
+  "program": "zerolend_usad_v2.aleo",
   "structs": [],
   "records": [
     {
@@ -113,63 +113,6 @@
           "mode": "None"
         }
       ]
-    },
-    {
-      "path": [
-        "UsadFlashBond"
-      ],
-      "fields": [
-        {
-          "name": "owner",
-          "ty": {
-            "Primitive": "Address"
-          },
-          "mode": "None"
-        },
-        {
-          "name": "amount",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "name": "fee",
-          "ty": {
-            "Primitive": {
-              "UInt": "U128"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "name": "issued_at",
-          "ty": {
-            "Primitive": {
-              "UInt": "U32"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "name": "expiry",
-          "ty": {
-            "Primitive": {
-              "UInt": "U32"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "name": "nonce",
-          "ty": {
-            "Primitive": "Field"
-          },
-          "mode": "None"
-        }
-      ]
     }
   ],
   "mappings": [
@@ -256,17 +199,6 @@
       },
       "value": {
         "Primitive": "Boolean"
-      }
-    },
-    {
-      "name": "pending_flash",
-      "key": {
-        "Primitive": "Field"
-      },
-      "value": {
-        "Primitive": {
-          "UInt": "U128"
-        }
       }
     },
     {
@@ -405,7 +337,7 @@
               "path": [
                 "UsadDeposit"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_usad_v2.aleo"
             }
           },
           "mode": "None"
@@ -427,7 +359,7 @@
               "path": [
                 "UsadDeposit"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_usad_v2.aleo"
             }
           },
           "mode": "None"
@@ -525,7 +457,7 @@
               "path": [
                 "UsadLoan"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_usad_v2.aleo"
             }
           },
           "mode": "None"
@@ -569,7 +501,7 @@
               "path": [
                 "UsadLoan"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_usad_v2.aleo"
             }
           },
           "mode": "None"
@@ -657,7 +589,7 @@
               "path": [
                 "UsadLoan"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "zerolend_usad_v2.aleo"
             }
           },
           "mode": "None"
@@ -682,65 +614,11 @@
       ]
     },
     {
-      "name": "flash_open",
+      "name": "flash_loan",
       "is_final": true,
       "inputs": [
         {
-          "name": "amount",
-          "ty": {
-            "Plaintext": {
-              "Primitive": {
-                "UInt": "U128"
-              }
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "name": "cur_block",
-          "ty": {
-            "Plaintext": {
-              "Primitive": {
-                "UInt": "U32"
-              }
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "name": "bond_nonce",
-          "ty": {
-            "Plaintext": {
-              "Primitive": "Field"
-            }
-          },
-          "mode": "None"
-        }
-      ],
-      "outputs": [
-        {
-          "ty": {
-            "Record": {
-              "path": [
-                "UsadFlashBond"
-              ],
-              "program": "zerolend_usad_v1.aleo"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "ty": {
-            "Record": {
-              "path": [
-                "ComplianceRecord"
-              ],
-              "program": "test_usad_stablecoin.aleo"
-            }
-          },
-          "mode": "None"
-        },
-        {
+          "name": "repayment",
           "ty": {
             "Record": {
               "path": [
@@ -752,41 +630,7 @@
           "mode": "None"
         },
         {
-          "ty": "Final",
-          "mode": "None"
-        }
-      ]
-    },
-    {
-      "name": "flash_repay",
-      "is_final": true,
-      "inputs": [
-        {
-          "name": "bond",
-          "ty": {
-            "Record": {
-              "path": [
-                "UsadFlashBond"
-              ],
-              "program": "zerolend_usad_v1.aleo"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "name": "payment",
-          "ty": {
-            "Record": {
-              "path": [
-                "Token"
-              ],
-              "program": "test_usad_stablecoin.aleo"
-            }
-          },
-          "mode": "None"
-        },
-        {
-          "name": "proof",
+          "name": "repay_proof",
           "ty": {
             "Plaintext": {
               "Array": {
@@ -803,6 +647,26 @@
             }
           },
           "mode": "None"
+        },
+        {
+          "name": "amount",
+          "ty": {
+            "Plaintext": {
+              "Primitive": {
+                "UInt": "U128"
+              }
+            }
+          },
+          "mode": "None"
+        },
+        {
+          "name": "loan_nonce",
+          "ty": {
+            "Plaintext": {
+              "Primitive": "Field"
+            }
+          },
+          "mode": "None"
         }
       ],
       "outputs": [
@@ -829,40 +693,27 @@
           "mode": "None"
         },
         {
-          "ty": "Final",
-          "mode": "None"
-        }
-      ]
-    },
-    {
-      "name": "flash_default",
-      "is_final": true,
-      "inputs": [
-        {
-          "name": "bond",
           "ty": {
             "Record": {
               "path": [
-                "UsadFlashBond"
+                "ComplianceRecord"
               ],
-              "program": "zerolend_usad_v1.aleo"
+              "program": "test_usad_stablecoin.aleo"
             }
           },
           "mode": "None"
         },
         {
-          "name": "cur_block",
           "ty": {
-            "Plaintext": {
-              "Primitive": {
-                "UInt": "U32"
-              }
+            "Record": {
+              "path": [
+                "Token"
+              ],
+              "program": "test_usad_stablecoin.aleo"
             }
           },
           "mode": "None"
-        }
-      ],
-      "outputs": [
+        },
         {
           "ty": "Final",
           "mode": "None"
