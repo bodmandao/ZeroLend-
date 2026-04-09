@@ -1,16 +1,9 @@
 {
-  "program": "zerolend_oracle_v1.aleo",
-  "version": "0.1.0",
-  "description": "",
+  "program": "zerolend_oracle_v2.aleo",
+  "version": "0.2.0",
+  "description": "ZeroLend 2-of-3 threshold oracle for verified credit attestation",
   "license": "MIT",
-  "leo": "3.4.0",
- "dependencies": [
-    {
-      "name": "zerolend_lending_pool_v4.aleo",
-      "location": "network",
-      "path": null,
-      "edition": null
-    }
-  ],
+  "leo": "4.0.0",
+  "dependencies": [],
   "dev_dependencies": null
 }
