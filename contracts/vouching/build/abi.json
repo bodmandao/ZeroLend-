@@ -1,5 +1,5 @@
 {
-  "program": "zerolend_vouching_v1.aleo",
+  "program": "zerolend_vouching_v2.aleo",
   "structs": [],
   "records": [
     {
@@ -218,7 +218,7 @@
               "path": [
                 "VouchRecord"
               ],
-              "program": "zerolend_vouching_v1.aleo"
+              "program": "zerolend_vouching_v2.aleo"
             }
           },
           "mode": "None"
@@ -240,7 +240,7 @@
               "path": [
                 "VouchRecord"
               ],
-              "program": "zerolend_vouching_v1.aleo"
+              "program": "zerolend_vouching_v2.aleo"
             }
           },
           "mode": "None"
@@ -275,7 +275,7 @@
               "path": [
                 "VouchRecord"
               ],
-              "program": "zerolend_vouching_v1.aleo"
+              "program": "zerolend_vouching_v2.aleo"
             }
           },
           "mode": "None"

@@ -1,6 +1,7 @@
 import credits.aleo;
-import zerolend_lending_pool_v4.aleo;
-program zerolend_vouching_v1.aleo;
+import zerolend_oracle_v2.aleo;
+import zerolend_lending_pool_v5.aleo;
+program zerolend_vouching_v2.aleo;
 
 record VouchRecord:
     owner as address.private;
@@ -39,7 +40,7 @@ mapping slashed_to_pool:
 
 function initialize:
     async initialize self.caller into r0;
-    output r0 as zerolend_vouching_v1.aleo/initialize.future;
+    output r0 as zerolend_vouching_v2.aleo/initialize.future;
 
 finalize initialize:
     input r0 as address.public;
@@ -57,12 +58,12 @@ function vouch_for:
     assert.eq r5 true;
     is.neq self.caller r2 into r6;
     assert.eq r6 true;
-    call credits.aleo/transfer_private_to_public r0 zerolend_vouching_v1.aleo r1 into r7 r8;
+    call credits.aleo/transfer_private_to_public r0 zerolend_vouching_v2.aleo r1 into r7 r8;
     cast self.caller r2 r1 r3 r4 into r9 as VouchRecord.record;
     async vouch_for r8 self.caller r2 r1 r3 into r10;
     output r7 as credits.aleo/credits.record;
     output r9 as VouchRecord.record;
-    output r10 as zerolend_vouching_v1.aleo/vouch_for.future;
+    output r10 as zerolend_vouching_v2.aleo/vouch_for.future;
 
 finalize vouch_for:
     input r0 as credits.aleo/transfer_private_to_public.future;
@@ -71,7 +72,7 @@ finalize vouch_for:
     input r3 as u64.public;
     input r4 as u32.public;
     await r0;
-    get.or_use zerolend_lending_pool_v4.aleo/credit_passport[r1] 0u8 into r5;
+    get.or_use zerolend_lending_pool_v5.aleo/credit_passport[r1] 0u8 into r5;
     gte r5 4u8 into r6;
     assert.eq r6 true;
     get.or_use vouches_out[r1] 0u32 into r7;
@@ -82,7 +83,7 @@ finalize vouch_for:
     add r9 r10 into r11;
     get.or_use active_vouches[r11] 0u64 into r12;
     assert.eq r12 0u64;
-    get.or_use zerolend_lending_pool_v4.aleo/credit_passport[r2] 0u8 into r13;
+    get.or_use zerolend_lending_pool_v5.aleo/credit_passport[r2] 0u8 into r13;
     add r13 1u8 into r14;
     gt r14 5u8 into r15;
     ternary r15 5u8 r14 into r16;
@@ -101,7 +102,7 @@ function redeem_vouch:
     call credits.aleo/transfer_public_to_private self.caller r0.staked into r1 r2;
     async redeem_vouch r2 r0.owner r0.borrower r0.staked into r3;
     output r1 as credits.aleo/credits.record;
-    output r3 as zerolend_vouching_v1.aleo/redeem_vouch.future;
+    output r3 as zerolend_vouching_v2.aleo/redeem_vouch.future;
 
 finalize redeem_vouch:
     input r0 as credits.aleo/transfer_public_to_private.future;
@@ -114,7 +115,7 @@ finalize redeem_vouch:
     add r4 r5 into r6;
     get active_vouches[r6] into r7;
     assert.eq r7 r3;
-    get.or_use zerolend_lending_pool_v4.aleo/active_loan_count[0u8] 0u32 into r8;
+    get.or_use zerolend_lending_pool_v5.aleo/active_loan_count[0u8] 0u32 into r8;
     set 0u64 into active_vouches[r6];
     set 0u8 into vouch_boost[r2];
     get.or_use vouches_out[r1] 0u32 into r9;
@@ -135,7 +136,7 @@ function slash_vouch:
     input r0 as VouchRecord.record;
     input r1 as u32.private;
     async slash_vouch r0.owner r0.borrower r0.staked into r2;
-    output r2 as zerolend_vouching_v1.aleo/slash_vouch.future;
+    output r2 as zerolend_vouching_v2.aleo/slash_vouch.future;
 
 finalize slash_vouch:
     input r0 as address.public;
@@ -147,7 +148,7 @@ finalize slash_vouch:
     get active_vouches[r5] into r6;
     gt r6 0u64 into r7;
     assert.eq r7 true;
-    get.or_use zerolend_lending_pool_v4.aleo/credit_passport[r1] 0u8 into r8;
+    get.or_use zerolend_lending_pool_v5.aleo/credit_passport[r1] 0u8 into r8;
     get.or_use vouch_boost[r1] 0u8 into r9;
     lt r8 r9 into r10;
     assert.eq r10 true;
@@ -172,7 +173,7 @@ finalize slash_vouch:
 
 function prove_solvency:
     async prove_solvency into r0;
-    output r0 as zerolend_vouching_v1.aleo/prove_solvency.future;
+    output r0 as zerolend_vouching_v2.aleo/prove_solvency.future;
 
 finalize prove_solvency:
     get.or_use slashed_to_pool[0u8] 0u64 into r0;
