@@ -1,4 +1,7 @@
+// ================================================================
 // ZeroLend — Social Vouching Contract
+// Program: zerolend_vouching_v2.aleo
+//
 // Diamond/Platinum tier holders can stake ALEO behind a borrower,
 // giving that borrower a +1 tier boost while the vouch is active.
 // If the borrower defaults, anyone can slash the voucher's stake
@@ -7,7 +10,7 @@
 // ================================================================
 
 import credits.aleo;
-import zerolend_lending_pool_v4.aleo;
+import zerolend_lending_pool_v5.aleo;
 
 // ================================================================
 // HELPERS
@@ -17,7 +20,7 @@ fn vouch_key(voucher: address, borrower: address) -> field {
     return BHP256::hash_to_field(voucher) + BHP256::hash_to_field(borrower);
 }
 
-program zerolend_vouching_v1.aleo {
+program zerolend_vouching_v2.aleo {
 
     // ================================================================
     // RECORDS
@@ -104,7 +107,7 @@ program zerolend_vouching_v1.aleo {
         return (change, vouch, final {
             transfer_future.run();
 
-            let voucher_tier: u8 = zerolend_lending_pool_v4.aleo::credit_passport.get_or_use(
+            let voucher_tier: u8 = zerolend_lending_pool_v5.aleo::credit_passport.get_or_use(
                 voucher, 0u8
             );
             assert(voucher_tier >= MIN_VOUCHER_TIER);
@@ -116,7 +119,7 @@ program zerolend_vouching_v1.aleo {
             let existing: u64 = active_vouches.get_or_use(key, 0u64);
             assert_eq(existing, 0u64);
 
-            let borrower_tier: u8 = zerolend_lending_pool_v4.aleo::credit_passport.get_or_use(
+            let borrower_tier: u8 = zerolend_lending_pool_v5.aleo::credit_passport.get_or_use(
                 borrower, 0u8
             );
             let boosted: u8 = borrower_tier + TIER_BOOST;
@@ -155,7 +158,7 @@ program zerolend_vouching_v1.aleo {
             let active: u64 = active_vouches.get(key);
             assert_eq(active, stake_amt);
 
-            let active_loans: u32 = zerolend_lending_pool_v4.aleo::active_loan_count.get_or_use(0u8, 0u32);
+            let active_loans: u32 = zerolend_lending_pool_v5.aleo::active_loan_count.get_or_use(0u8, 0u32);
 
             active_vouches.set(key, 0u64);
             vouch_boost.set(borrower, 0u8);
@@ -184,7 +187,7 @@ program zerolend_vouching_v1.aleo {
             let active: u64 = active_vouches.get(key);
             assert(active > 0u64);
 
-            let borrower_tier: u8 = zerolend_lending_pool_v4.aleo::credit_passport.get_or_use(
+            let borrower_tier: u8 = zerolend_lending_pool_v5.aleo::credit_passport.get_or_use(
                 borrower, 0u8
             );
             let boost: u8 = vouch_boost.get_or_use(borrower, 0u8);
