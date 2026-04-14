@@ -102,8 +102,8 @@ export default function GovernancePage() {
               style={{
                 background: `${color}10`,
                 border: `1px solid ${color}25`,
-                ringColor: color,
-              }}>
+                '--ring-color': color,
+              } as React.CSSProperties}>
               <p className="text-lg font-bold font-mono" style={{ color }}>{mult}</p>
               <p className="text-xs text-zero-text-dim mt-1">{label}</p>
               {t === tier && <p className="text-xs mt-1" style={{ color }}>You</p>}

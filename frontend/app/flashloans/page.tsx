@@ -86,7 +86,7 @@ export default function FlashLoanPage() {
         return bal >= totalOwed;
       }) ?? unspent[0];
 
-      const repayBal = parseInt((repayRecord.data?.microcredits ?? '0').replace(/u64.*/, ''));
+      const repayBal = parseInt(((repayRecord as any).data?.microcredits ?? '0').replace(/u64.*/, ''));
       if (repayBal < totalOwed) {
         toast.error(
           `Insufficient private balance. Need ${microToAleo(totalOwed).toFixed(4)} ALEO ` +
@@ -97,7 +97,7 @@ export default function FlashLoanPage() {
       }
 
       // 2. Decrypt repayment record
-      const decryptedRepayment = await decrypt?.(repayRecord.recordCiphertext);
+      const decryptedRepayment = await decrypt?.((repayRecord as any).recordCiphertext);
       if (!decryptedRepayment) {
         toast.error('Could not decrypt repayment record');
         setStep('idle'); return;
