@@ -1,5 +1,5 @@
 {
-  "program": "zerolend_governance_v1.aleo",
+  "program": "zerolend_governance_v2.aleo",
   "structs": [
     {
       "path": [
@@ -153,7 +153,7 @@
           "path": [
             "ProposalContent"
           ],
-          "program": "zerolend_governance_v1.aleo"
+          "program": "zerolend_governance_v2.aleo"
         }
       }
     },
@@ -345,7 +345,7 @@
               "path": [
                 "GovernanceStake"
               ],
-              "program": "zerolend_governance_v1.aleo"
+              "program": "zerolend_governance_v2.aleo"
             }
           },
           "mode": "None"
@@ -367,7 +367,7 @@
               "path": [
                 "GovernanceStake"
               ],
-              "program": "zerolend_governance_v1.aleo"
+              "program": "zerolend_governance_v2.aleo"
             }
           },
           "mode": "None"
@@ -504,7 +504,7 @@
               "path": [
                 "Ballot"
               ],
-              "program": "zerolend_governance_v1.aleo"
+              "program": "zerolend_governance_v2.aleo"
             }
           },
           "mode": "None"

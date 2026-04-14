@@ -1,6 +1,7 @@
 import credits.aleo;
-import zerolend_lending_pool_v4.aleo;
-program zerolend_governance_v1.aleo;
+import zerolend_oracle_v2.aleo;
+import zerolend_lending_pool_v5.aleo;
+program zerolend_governance_v2.aleo;
 
 record Ballot:
     owner as address.private;
@@ -72,7 +73,7 @@ mapping proposal_count:
 
 function initialize:
     async initialize self.caller into r0;
-    output r0 as zerolend_governance_v1.aleo/initialize.future;
+    output r0 as zerolend_governance_v2.aleo/initialize.future;
 
 finalize initialize:
     input r0 as address.public;
@@ -89,19 +90,19 @@ function stake:
     input r3 as field.private;
     gte r1 1000000u64 into r4;
     assert.eq r4 true;
-    call credits.aleo/transfer_private_to_public r0 zerolend_governance_v1.aleo r1 into r5 r6;
+    call credits.aleo/transfer_private_to_public r0 zerolend_governance_v2.aleo r1 into r5 r6;
     cast self.caller r1 r2 r3 into r7 as GovernanceStake.record;
     async stake r6 self.caller r1 into r8;
     output r5 as credits.aleo/credits.record;
     output r7 as GovernanceStake.record;
-    output r8 as zerolend_governance_v1.aleo/stake.future;
+    output r8 as zerolend_governance_v2.aleo/stake.future;
 
 finalize stake:
     input r0 as credits.aleo/transfer_private_to_public.future;
     input r1 as address.public;
     input r2 as u64.public;
     await r0;
-    get.or_use zerolend_lending_pool_v4.aleo/credit_passport[r1] 0u8 into r3;
+    get.or_use zerolend_lending_pool_v5.aleo/credit_passport[r1] 0u8 into r3;
     gte r3 1u8 into r4;
     assert.eq r4 true;
     get.or_use staked_balance[r1] 0u64 into r5;
@@ -117,7 +118,7 @@ function unstake:
     call credits.aleo/transfer_public_to_private self.caller r0.staked into r1 r2;
     async unstake r2 self.caller r0.staked into r3;
     output r1 as credits.aleo/credits.record;
-    output r3 as zerolend_governance_v1.aleo/unstake.future;
+    output r3 as zerolend_governance_v2.aleo/unstake.future;
 
 finalize unstake:
     input r0 as credits.aleo/transfer_public_to_private.future;
@@ -143,13 +144,13 @@ function propose:
     input r4 as u32.private;
     cast r0 r1 r2 r3 into r5 as ProposalContent;
     async propose self.caller r5 r4 into r6;
-    output r6 as zerolend_governance_v1.aleo/propose.future;
+    output r6 as zerolend_governance_v2.aleo/propose.future;
 
 finalize propose:
     input r0 as address.public;
     input r1 as ProposalContent.public;
     input r2 as u32.public;
-    get.or_use zerolend_lending_pool_v4.aleo/credit_passport[r0] 0u8 into r3;
+    get.or_use zerolend_lending_pool_v5.aleo/credit_passport[r0] 0u8 into r3;
     gte r3 3u8 into r4;
     assert.eq r4 true;
     get.or_use staked_balance[r0] 0u64 into r5;
@@ -178,7 +179,7 @@ function cast_vote:
     cast self.caller r0 r1 0u64 r2 r3 into r4 as Ballot.record;
     async cast_vote r0 r2 self.caller r1 into r5;
     output r4 as Ballot.record;
-    output r5 as zerolend_governance_v1.aleo/cast_vote.future;
+    output r5 as zerolend_governance_v2.aleo/cast_vote.future;
 
 finalize cast_vote:
     input r0 as field.public;
@@ -197,7 +198,7 @@ finalize cast_vote:
     not r10 into r11;
     assert.eq r11 true;
     set true into has_voted[r9];
-    get.or_use zerolend_lending_pool_v4.aleo/credit_passport[r2] 0u8 into r12;
+    get.or_use zerolend_lending_pool_v5.aleo/credit_passport[r2] 0u8 into r12;
     gte r12 1u8 into r13;
     assert.eq r13 true;
     get.or_use staked_balance[r2] 0u64 into r14;
@@ -220,7 +221,7 @@ function execute_proposal:
     input r0 as field.private;
     input r1 as u32.private;
     async execute_proposal r0 r1 into r2;
-    output r2 as zerolend_governance_v1.aleo/execute_proposal.future;
+    output r2 as zerolend_governance_v2.aleo/execute_proposal.future;
 
 finalize execute_proposal:
     input r0 as field.public;
