@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import {
   ShieldCheck, Shield, Zap,
-  Eye, EyeOff, CheckCircle, Loader2, Info, Link as LinkIcon
+  Eye, EyeOff, CheckCircle, Loader2, Info
 } from 'lucide-react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { useStore } from '../../lib/store';
@@ -16,8 +16,8 @@ import {
   fetchMappingValue,
 } from '../../lib/aleo';
 import {
-  insertAttestation, markAttestationRedeemed,
-  getUserLoanHistory, saveAttestationTxId, getAttestationTxId,
+  insertAttestation,
+  getUserLoanHistory, getAttestationTxId,
   getExistingAttestation, markTierProofGenerated,
 } from '../../lib/supabase';
 import toast from 'react-hot-toast';
@@ -60,7 +60,7 @@ async function fetchWalletAgeDays(address: string): Promise<number> {
 export default function CreditPage() {
   const { transactionStatus, decrypt, connected, address, executeTransaction: executeHandler } = useWallet();
   const {
-    wallet, creditScore, creditTier, creditRecord, tierProof,
+    creditScore, creditTier, creditRecord,
     setCreditRecord, setTierProof, clearCredit
   } = useStore();
 
@@ -79,11 +79,12 @@ export default function CreditPage() {
     creditRecord ? 'done' : 'idle'
   );
   const [showRawData, setShowRawData]     = useState(false);
-  const [attestation, setAttestation]     = useState<any>(null);
   const [proofExpiry, setProofExpiry]     = useState('200');
   const [dbTierProof, setDbTierProof]     = useState(false);
-  const [oracleVerified, setOracleVerified] = useState<boolean | null>(null);
-  const [checkingOracle, setCheckingOracle] = useState(false);
+  const [oracleVerified,      setOracleVerified]      = useState<boolean | null>(null);
+  const [checkingOracle,      setCheckingOracle]      = useState(false);
+  const [submittedForOracle,  setSubmittedForOracle]  = useState(false);
+  const [submittingForOracle, setSubmittingForOracle] = useState(false);
 
   // ── Clear all state when wallet disconnects or changes ───────
   useEffect(() => {
@@ -113,6 +114,7 @@ export default function CreditPage() {
       try {
         const att = await getExistingAttestation(address);
         if (!att) return;
+        setSubmittedForOracle(true);
         const score = att.computed_score ?? 0;
         const tier  = scoreToTier(score);
         setCreditRecord({
@@ -209,6 +211,36 @@ export default function CreditPage() {
     const cipher = await waitForRecordCiphertext(txId);
     if (!cipher) return null;
     return await decrypt(cipher) ?? null;
+  }
+
+  async function handleSubmitForOracle() {
+    if (!connected || !address) { toast.error('Connect your wallet first'); return; }
+    if (!prefillDone) { toast.error('Wait for data to load'); return; }
+    setSubmittingForOracle(true);
+    try {
+      const age  = parseInt(form.walletAgeDays)  || 0;
+      const reps = parseInt(form.repaymentsMade) || 0;
+      const defs = parseInt(form.defaults)       || 0;
+      const vol  = aleoToMicro(parseFloat(form.totalVolume) || 0);
+      const computedScore = computeCreditScore(age, reps, defs, vol);
+      const tier          = scoreToTier(computedScore);
+      await insertAttestation({
+        user_address:    address,
+        attestation_id:  randomField(),
+        wallet_age_days: age,
+        repayments_made: reps,
+        defaults:        defs,
+        total_volume:    vol,
+        computed_score:  computedScore,
+        tier,
+      });
+      setSubmittedForOracle(true);
+      toast.success('Submitted for oracle review. An oracle operator will attest your data shortly.');
+    } catch (e: any) {
+      toast.error(e.message ?? 'Submission failed');
+    } finally {
+      setSubmittingForOracle(false);
+    }
   }
 
   async function handleAttest() {
@@ -383,7 +415,7 @@ export default function CreditPage() {
             <p className="text-xs text-zero-text-dim leading-relaxed">
               {oracleVerified
                 ? '2-of-3 oracles confirmed your on-chain data. Your credit inputs are oracle-approved — attest_credit will verify them on-chain.'
-                : 'attest_credit now verifies your inputs against oracle-approved data. Complete oracle attestation on the Oracle page first, then return here to mint your CreditRecord.'
+                : 'Your credit inputs must be approved by the oracle network before minting. Visit the Oracle page to complete 2-of-3 attestation first.'
               }
             </p>
             {!oracleVerified && !checkingOracle && (
@@ -475,9 +507,13 @@ export default function CreditPage() {
             </div>
             <div className="flex-1">
               <h3 className="text-sm font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
-                Mint Credit Record
+                {oracleVerified ? 'Mint Credit Record' : 'Submit for Oracle Review'}
               </h3>
-              <p className="text-xs text-zero-text-dim">Claim your oracle-verified credit on-chain</p>
+              <p className="text-xs text-zero-text-dim">
+                {oracleVerified
+                  ? 'Claim your oracle-verified credit on-chain'
+                  : 'Submit your data so oracles can verify it'}
+              </p>
             </div>
             {prefilling && (
               <div className="flex items-center gap-1.5 text-xs text-zero-text-dim">
@@ -490,16 +526,6 @@ export default function CreditPage() {
               </div>
             )}
           </div>
-
-          {prefillDone && !prefilling && (
-            <div className="mb-4 p-3 rounded-xl flex items-start gap-2 text-xs"
-              style={{ background: 'rgba(0,212,255,0.05)', border: '1px solid rgba(0,212,255,0.12)' }}>
-              <Info size={12} className="text-zero-cyan mt-0.5 flex-shrink-0" />
-              <span className="text-zero-text-dim leading-relaxed">
-                Pre-filled from your on-chain wallet age and ZeroLend history. These values are oracle-verified and cannot be changed.
-              </span>
-            </div>
-          )}
 
           {!connected && (
             <div className="mb-4 p-3 rounded-xl text-xs text-center text-zero-text-dim"
@@ -522,13 +548,13 @@ export default function CreditPage() {
                 </div>
                 <div className="relative">
                   <input
-                    className={`zero-input ${key === 'totalVolume' ? 'pr-14' : ''} opacity-60 cursor-not-allowed`}
+                    className={`zero-input ${key === 'totalVolume' ? 'pr-14' : ''} ${(oracleVerified || submittedForOracle) ? 'opacity-60 cursor-not-allowed' : ''}`}
                     type="number"
                     placeholder={prefilling ? 'Loading…' : '0'}
-                    disabled
-                    readOnly
+                    disabled={oracleVerified || submittedForOracle || prefilling}
+                    readOnly={oracleVerified || submittedForOracle}
                     value={form[key as keyof typeof form]}
-                    onChange={() => {}}
+                    onChange={(e) => setForm(f => ({ ...f, [key]: e.target.value }))}
                   />
                   {key === 'totalVolume' && (
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zero-text-dim text-xs">ALEO</span>
@@ -557,19 +583,40 @@ export default function CreditPage() {
             </div>
           )}
 
-          <button
-            onClick={handleAttest}
-            disabled={step === 'attesting' || prefilling || !connected || !oracleVerified}
-            className="btn-primary w-full mt-4 flex items-center justify-center gap-2"
-          >
-            {step === 'attesting' ? (
-              <><div className="zk-loader" style={{ width: 14, height: 14 }} />Attesting…</>
-            ) : prefilling ? (
-              <><Loader2 size={14} className="animate-spin" />Loading history…</>
-            ) : (
-              <><Shield size={14} />Mint Credit Record</>
-            )}
-          </button>
+          {/* Phase A — submit for oracle review */}
+          {!oracleVerified && (
+            <button
+              onClick={handleSubmitForOracle}
+              disabled={submittingForOracle || prefilling || !connected || submittedForOracle}
+              className="btn-primary w-full mt-4 flex items-center justify-center gap-2"
+              style={submittedForOracle ? { background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)', color: '#f59e0b', cursor: 'default' } : {}}
+            >
+              {submittingForOracle ? (
+                <><Loader2 size={14} className="animate-spin" />Submitting…</>
+              ) : submittedForOracle ? (
+                <><Loader2 size={14} className="animate-spin" />Pending oracle review…</>
+              ) : prefilling ? (
+                <><Loader2 size={14} className="animate-spin" />Loading history…</>
+              ) : (
+                <><Shield size={14} />Submit for Oracle Review</>
+              )}
+            </button>
+          )}
+
+          {/* Phase B — mint after oracle verified */}
+          {oracleVerified && (
+            <button
+              onClick={handleAttest}
+              disabled={step === 'attesting' || prefilling || !connected}
+              className="btn-primary w-full mt-4 flex items-center justify-center gap-2"
+            >
+              {step === 'attesting' ? (
+                <><div className="zk-loader" style={{ width: 14, height: 14 }} />Attesting…</>
+              ) : (
+                <><Shield size={14} />Mint Credit Record</>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Steps 2 & 3 */}

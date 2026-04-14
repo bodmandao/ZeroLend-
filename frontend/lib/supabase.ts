@@ -102,6 +102,17 @@ export async function getExistingAttestation(address: string) {
   return data ?? null;
 }
 
+// ── Get all attestations (for oracle operator panel) ─────────
+export async function getAllAttestations() {
+  const { data } = await supabase
+    .from('credit_attestations')
+    .select('user_address, wallet_age_days, repayments_made, defaults, total_volume, computed_score, tier, created_at')
+    .eq('redeemed', false)
+    .order('created_at', { ascending: false })
+    .limit(50);
+  return data ?? [];
+}
+
 // ── Get user loan history for credit prefill ──────────────────
 export async function getUserLoanHistory(address: string) {
   const { data } = await supabase
@@ -346,7 +357,6 @@ export async function getPoolSnapshots(limit = 14): Promise<{
   if (!data?.length) return [];
  
   return data.map((row, i) => {
-    const date = new Date(row.created_at);
     const label = i === data.length - 1
       ? 'Now'
       : `D${i + 1}`;

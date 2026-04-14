@@ -23,7 +23,9 @@ export default function WalletProvider({
       network={Network.TESTNET}
       autoConnect
       decryptPermission={DecryptPermission.UponRequest}
-      programs={["zerolend_lending_pool_v4.aleo","credits.aleo"]} 
+      programs={["zerolend_lending_pool_v5.aleo","credits.aleo","zerolend_vouching_v2.aleo",
+      "test_usdcx_stablecoin.aleo","test_usad_stablecoin.aleo",
+      "zerolend_governance_v2.aleo","zerolend_oracle_v2.aleo","test_usdcx_stablecoin.aleo"]} 
       onError={(error) => console.error(error)}
     >
       <WalletModalProvider>{children}</WalletModalProvider>

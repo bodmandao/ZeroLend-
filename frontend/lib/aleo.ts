@@ -216,6 +216,7 @@ export async function fetchMappingValue(
     );
     if (!res.ok) return null;
     const raw = await res.json();
+    if (raw === null || raw === undefined) return null;
     if (typeof raw === 'string') return raw.replace(/^"|"$/g, '');
     return String(raw);
   } catch {
