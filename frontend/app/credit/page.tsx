@@ -3,16 +3,17 @@
 import { useState, useEffect } from 'react';
 import {
   ShieldCheck, Shield, Zap,
-  Eye, EyeOff, CheckCircle, Loader2, Info
+  Eye, EyeOff, CheckCircle, Loader2, Info, Link as LinkIcon
 } from 'lucide-react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { useStore } from '../../lib/store';
 import {
   computeCreditScore, scoreToTier, getTierInfo,
-  randomField, executeTransaction, PROGRAM_ID,
+  randomField, executeTransaction, PROGRAM_ID, PROGRAM_ID_ORACLE,
   aleoToMicro, microToAleo,
   getCurrentBlockHeight,
   waitForRecordCiphertext,
+  fetchMappingValue,
 } from '../../lib/aleo';
 import {
   insertAttestation, markAttestationRedeemed,
@@ -80,7 +81,9 @@ export default function CreditPage() {
   const [showRawData, setShowRawData]     = useState(false);
   const [attestation, setAttestation]     = useState<any>(null);
   const [proofExpiry, setProofExpiry]     = useState('200');
-  const [dbTierProof, setDbTierProof]     = useState(false); 
+  const [dbTierProof, setDbTierProof]     = useState(false);
+  const [oracleVerified, setOracleVerified] = useState<boolean | null>(null);
+  const [checkingOracle, setCheckingOracle] = useState(false);
 
   // ── Clear all state when wallet disconnects or changes ───────
   useEffect(() => {
@@ -130,6 +133,18 @@ export default function CreditPage() {
         setStep('done');
       } catch { /* DB unavailable */ }
     })();
+  }, [address]);
+
+  // ── Check oracle verification status ─────────────────────────
+  useEffect(() => {
+    if (!connected || !address) { setOracleVerified(null); return; }
+    setCheckingOracle(true);
+    fetchMappingValue(PROGRAM_ID_ORACLE, 'verified_inputs', address)
+      .then(val => {
+        setOracleVerified(val !== null && val !== '0field');
+      })
+      .catch(() => setOracleVerified(false))
+      .finally(() => setCheckingOracle(false));
   }, [address]);
 
   async function prefillForm(addr: string) {
@@ -340,6 +355,46 @@ export default function CreditPage() {
         </p>
       </div>
 
+      {/* Oracle verification gate */}
+      {connected && (
+        <div className="rounded-2xl p-5 flex items-start gap-4" style={{
+          background: oracleVerified
+            ? 'linear-gradient(135deg, rgba(16,185,129,0.07), rgba(0,212,255,0.04))'
+            : 'rgba(245,158,11,0.06)',
+          border: `1px solid ${oracleVerified ? 'rgba(16,185,129,0.25)' : 'rgba(245,158,11,0.25)'}`,
+        }}>
+          <div className="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center mt-0.5"
+            style={{ background: oracleVerified ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.12)',
+              border: `1px solid ${oracleVerified ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.3)'}` }}>
+            {checkingOracle
+              ? <div className="zk-loader" style={{ width: 14, height: 14 }} />
+              : oracleVerified
+                ? <ShieldCheck size={18} className="text-zero-green" />
+                : <Shield size={18} className="text-yellow-400" />
+            }
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold mb-1"
+              style={{ color: oracleVerified ? '#10b981' : '#f59e0b', fontFamily: "'Syne', sans-serif" }}>
+              {checkingOracle ? 'Checking oracle verification…'
+                : oracleVerified ? 'Oracle Verified — Ready to Attest'
+                : 'Oracle Verification Required'}
+            </p>
+            <p className="text-xs text-zero-text-dim leading-relaxed">
+              {oracleVerified
+                ? '2-of-3 oracles confirmed your on-chain data. Your credit inputs are oracle-approved — attest_credit will verify them on-chain.'
+                : 'attest_credit now verifies your inputs against oracle-approved data. Complete oracle attestation on the Oracle page first, then return here to mint your CreditRecord.'
+              }
+            </p>
+            {!oracleVerified && !checkingOracle && (
+              <a href="/oracle" className="inline-flex items-center gap-1.5 mt-2 text-xs font-semibold text-yellow-400 hover:text-yellow-300 transition-colors">
+                Go to Oracle page →
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Current score card */}
       {creditScore !== null && tierInfo && (
         <div className="rounded-3xl p-8 relative overflow-hidden" style={{
@@ -420,9 +475,9 @@ export default function CreditPage() {
             </div>
             <div className="flex-1">
               <h3 className="text-sm font-semibold text-zero-text" style={{ fontFamily: "'Syne', sans-serif" }}>
-                Oracle Attestation
+                Mint Credit Record
               </h3>
-              <p className="text-xs text-zero-text-dim">Submit credit data for ZK attestation</p>
+              <p className="text-xs text-zero-text-dim">Claim your oracle-verified credit on-chain</p>
             </div>
             {prefilling && (
               <div className="flex items-center gap-1.5 text-xs text-zero-text-dim">
@@ -441,7 +496,7 @@ export default function CreditPage() {
               style={{ background: 'rgba(0,212,255,0.05)', border: '1px solid rgba(0,212,255,0.12)' }}>
               <Info size={12} className="text-zero-cyan mt-0.5 flex-shrink-0" />
               <span className="text-zero-text-dim leading-relaxed">
-                Pre-filled from your on-chain wallet age and ZeroLend history. You can edit before attesting.
+                Pre-filled from your on-chain wallet age and ZeroLend history. These values are oracle-verified and cannot be changed.
               </span>
             </div>
           )}
@@ -467,13 +522,13 @@ export default function CreditPage() {
                 </div>
                 <div className="relative">
                   <input
-                    className={`zero-input ${key === 'totalVolume' ? 'pr-14' : ''} ${(prefilling || prefillDone) ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    className={`zero-input ${key === 'totalVolume' ? 'pr-14' : ''} opacity-60 cursor-not-allowed`}
                     type="number"
                     placeholder={prefilling ? 'Loading…' : '0'}
-                    disabled={prefilling || prefillDone || step !== 'idle'}
-                    readOnly={prefillDone}
+                    disabled
+                    readOnly
                     value={form[key as keyof typeof form]}
-                    onChange={(e) => setForm(f => ({ ...f, [key]: e.target.value }))}
+                    onChange={() => {}}
                   />
                   {key === 'totalVolume' && (
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zero-text-dim text-xs">ALEO</span>
@@ -504,7 +559,7 @@ export default function CreditPage() {
 
           <button
             onClick={handleAttest}
-            disabled={step === 'attesting' || prefilling || !connected}
+            disabled={step === 'attesting' || prefilling || !connected || !oracleVerified}
             className="btn-primary w-full mt-4 flex items-center justify-center gap-2"
           >
             {step === 'attesting' ? (
@@ -512,7 +567,7 @@ export default function CreditPage() {
             ) : prefilling ? (
               <><Loader2 size={14} className="animate-spin" />Loading history…</>
             ) : (
-              <><Shield size={14} />Attest Credit Data</>
+              <><Shield size={14} />Mint Credit Record</>
             )}
           </button>
         </div>

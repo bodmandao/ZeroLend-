@@ -1,9 +1,9 @@
-export const PROGRAM_ID            = 'zerolend_lending_pool_v4.aleo';
-export const PROGRAM_ID_USDCX      = 'zerolend_usdcx_v1.aleo';
-export const PROGRAM_ID_USAD       = 'zerolend_usad_v1.aleo';
-export const PROGRAM_ID_ORACLE     = 'zerolend_oracle_v1.aleo';
-export const PROGRAM_ID_VOUCHING   = 'zerolend_vouching_v1.aleo';
-export const PROGRAM_ID_GOVERNANCE = 'zerolend_governance_v1.aleo';
+export const PROGRAM_ID            = 'zerolend_lending_pool_v5.aleo';
+export const PROGRAM_ID_USDCX      = 'zerolend_usdcx_v2.aleo';
+export const PROGRAM_ID_USAD       = 'zerolend_usad_v2.aleo';
+export const PROGRAM_ID_ORACLE     = 'zerolend_oracle_v2.aleo';
+export const PROGRAM_ID_VOUCHING   = 'zerolend_vouching_v2.aleo';
+export const PROGRAM_ID_GOVERNANCE = 'zerolend_governance_v2.aleo';
 export const NETWORK    = 'testnet';
 export const API_URL    = 'https://api.explorer.provable.com/v2';
 export const ORG_ID     = '1field';
